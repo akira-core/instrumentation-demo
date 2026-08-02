@@ -1,0 +1,14 @@
+{{- /*
+Namespaced operator RBAC only grants access inside the release namespace, so
+watchNamespaces (when set) must not list foreign namespaces. With the Altinity
+operator an empty watchNamespaces list means "watch the operator's own
+namespace" when not running in kube-system — which matches namespaced RBAC.
+*/ -}}
+{{- if and .Values.operator.enabled (dig "rbac" "namespaceScoped" false .Values.operator) }}
+{{- $watch := .Values.operator.watchNamespaces | default list }}
+{{- range $ns := $watch }}
+{{- if and (ne $ns ".*") (ne $ns $.Release.Namespace) }}
+{{- fail (printf "operator.watchNamespaces contains %q but operator.rbac.namespaceScoped=true only grants access in %q. Install the operator into %q, drop that entry, set watchNamespaces to [] (own namespace), or set operator.rbac.namespaceScoped=false" $ns $.Release.Namespace $ns) }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -61,8 +61,8 @@ VictoriaMetrics）。GOFF relay proxy 提供 **函式庫** 功能開關（例如
 | **backend** | `backend/` | SERVER span、安裝 OpenFeature provider、以 `otelnats` 做 NATS 請求／回覆 |
 | **NATS** | vendored chart | demo 訊息匯流排 |
 | **relay-proxy** | GOFF chart | 從即時 ConfigMap 提供函式庫旗標 `otel-nats-tracing` |
-| **rotel** | deploy manifest | OTLP collector → ClickHouse（及管線指標） |
-| **ClickHouse** | vendored chart | trace 儲存 |
+| **rotel** | ClickHouse chart（子圖） | OTLP collector → ClickHouse（管線指標 → VM） |
+| **ClickHouse** | vendored chart（Altinity operator） | trace 儲存（CHI + Keeper） |
 | **Grafana** | vendored chart | trace 與 metrics 儀表板 |
 | **VictoriaMetrics** | vendored chart | 指標儲存（OTLP push + Prometheus scrape） |
 
@@ -121,7 +121,7 @@ VictoriaMetrics。
 - `frontend/` — 瀏覽器應用；開啟 trace 並呼叫後端。
 - `backend/` — Go HTTP 服務；延續 trace、安裝 OpenFeature 供函式庫旗標使用、NATS 發布／訂閱。
 - `deploy/` — `kind` 叢集設定、in-house 服務的 Kustomize base、vendored chart 的 Helm values。
-- `charts/` — 第三方 Helm charts（NATS、ClickHouse、Grafana、VictoriaMetrics、GO Feature Flag relay proxy）。各子目錄有 `SOURCE.txt` 記錄拉取版本。
+- `charts/` — 第三方 Helm charts（NATS、Altinity operator 傘狀 ClickHouse、Grafana、VictoriaMetrics、GO Feature Flag relay proxy）。各子目錄有 `SOURCE.txt` 記錄拉取版本。
 - `deploy/loadgen/` — 按需負載 Job，不在預設 `deploy` 路徑內。
 - `third_party/` — 兄弟 instrumentation 倉庫的 git submodule
   （`instrumentation-js`、`instrumentation-go`）。

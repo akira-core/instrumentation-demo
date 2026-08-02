@@ -63,8 +63,8 @@ wire them.
 | **backend** | `backend/` | SERVER span, installs OpenFeature provider, NATS request/reply via `otelnats` |
 | **NATS** | vendored chart | Message bus for the demo round trip |
 | **relay-proxy** | GOFF chart | Serves library flag `otel-nats-tracing` from a live ConfigMap |
-| **rotel** | deploy manifest | OTLP collector → ClickHouse (+ pipeline metrics) |
-| **ClickHouse** | vendored chart | Trace storage |
+| **rotel** | ClickHouse chart (subchart) | OTLP collector → ClickHouse (+ pipeline metrics → VM) |
+| **ClickHouse** | vendored chart (Altinity operator) | Trace storage (CHI + Keeper) |
 | **Grafana** | vendored chart | Trace + metrics dashboards |
 | **VictoriaMetrics** | vendored chart | Metrics store (OTLP push + Prometheus scrape) |
 
@@ -132,9 +132,10 @@ evaluation to run.
   library flags, publishes/consumes on NATS.
 - `deploy/` — `kind` cluster config, Kustomize base for the in-house
   services, and Helm values for the vendored charts.
-- `charts/` — vendored third-party Helm charts (NATS, ClickHouse, Grafana,
-  VictoriaMetrics, and the GO Feature Flag relay proxy). Each subdirectory has
-  a `SOURCE.txt` recording the exact chart version pulled.
+- `charts/` — vendored third-party Helm charts (NATS, ClickHouse via the
+  Altinity operator umbrella, Grafana, VictoriaMetrics, and the GO Feature Flag
+  relay proxy). Each subdirectory has a `SOURCE.txt` recording the exact chart
+  version pulled.
 - `deploy/loadgen/` — on-demand load-generator Job, deliberately outside the
   default deploy path.
 - `third_party/` — git submodules for the sibling instrumentation repos

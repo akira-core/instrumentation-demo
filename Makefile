@@ -106,18 +106,35 @@ kind-load: build-images
 		echo "No kind cluster named '$$name' — skipping kind load (images must already be available to the cluster)"; \
 	fi
 
-# Install/upgrade the vendored third-party charts (NATS, ClickHouse, Grafana,
-# GOFF relay proxy). --create-namespace makes this safe to run before or after
-# k8s-apply. The relay-proxy release name must stay "relay-proxy" so its Service
-# resolves at the address the backend is configured with.
+# Install/upgrade the vendored third-party charts (NATS, ClickHouse+rotel via
+# Altinity operator, Grafana, GOFF relay proxy, VictoriaMetrics).
+# --create-namespace makes this safe to run before or after k8s-apply.
+# The clickhouse release also deploys rotel (Service name "rotel") and the
+# ClickHouse client Service (name "clickhouse") — see deploy/values/clickhouse.yaml.
+# The relay-proxy release name must stay "relay-proxy" so its Service resolves
+# at the address the backend is configured with.
+#
+# ClickHouse is installed in two steps on first apply so CRDs from the operator
+# exist before the CHI/CHK custom resources are created (avoids a race where
+# helm applies CRs before the crd-install Job finishes).
 helm-install: kube-context
 	helm upgrade --install nats charts/nats -f deploy/values/nats.yaml -n $(NAMESPACE) --create-namespace
-	helm upgrade --install clickhouse charts/clickhouse -f deploy/values/clickhouse.yaml -n $(NAMESPACE) --create-namespace
+	helm upgrade --install clickhouse-operator charts/clickhouse \
+		-f deploy/values/clickhouse.yaml \
+		--set cluster.enabled=false \
+		-n $(NAMESPACE) --create-namespace
+	@echo "Waiting for ClickHouse CRDs..."
+	@kubectl wait --for=condition=Established crd/clickhouseinstallations.clickhouse.altinity.com --timeout=120s
+	@kubectl wait --for=condition=Established crd/clickhousekeeperinstallations.clickhouse-keeper.altinity.com --timeout=120s
+	helm upgrade --install clickhouse charts/clickhouse \
+		-f deploy/values/clickhouse.yaml \
+		--set operator.enabled=false \
+		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n $(NAMESPACE) --create-namespace
 
-# Apply the in-house services (frontend, backend, feature-flags ConfigMap, rotel)
+# Apply the in-house services (frontend, backend, feature-flags ConfigMap)
 # via the Kustomize base.
 k8s-apply: kube-context
 	kubectl apply -k deploy/base
@@ -136,12 +153,21 @@ deploy: kind-up kind-load helm-install k8s-apply
 	@echo "  OTLP      http://localhost:$(PF_ROTEL_PORT)   (browser spans)"
 
 # Wait until the services we port-forward are rollouts-complete.
+# Also waits for the Altinity CHI (ClickHouse) to finish reconciling so rotel's
+# exporter and Grafana's datasource have a ready HTTP endpoint.
 wait-ready: kube-context
 	@echo "Waiting for demo deployments in namespace '$(NAMESPACE)'..."
 	kubectl -n $(NAMESPACE) rollout status deployment/frontend --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/backend --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/rotel --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/grafana --timeout=300s
+	@echo "Waiting for ClickHouseInstallation clickhouse-cluster..."
+	@for i in $$(seq 1 60); do \
+		st=$$(kubectl -n $(NAMESPACE) get chi clickhouse-cluster -o jsonpath='{.status.status}' 2>/dev/null || true); \
+		if [ "$$st" = "Completed" ]; then echo "CHI status=Completed"; break; fi; \
+		if [ "$$i" -eq 60 ]; then echo "timed out waiting for CHI (last status=$$st)"; exit 1; fi; \
+		sleep 5; \
+	done
 	@echo "Core deployments ready."
 
 # Port-forward frontend, backend, Grafana, and rotel in one process.

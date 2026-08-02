@@ -1,0 +1,29 @@
+# Helm
+# Dependencies are vendored as unpacked directories under charts/ so offline
+# environments can install without reaching ghcr.io. Packaged .tgz files are
+# rebuilt locally by `helm dependency update` and never committed.
+*.tgz
+!charts/cluster/
+!charts/cluster/**
+!charts/clickhouse-operator-helm/
+!charts/clickhouse-operator-helm/**
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Secrets / local overrides
+# Anchored to the repo root on purpose: an unanchored *-secrets.yaml also
+# matches chart templates, and silently kept charts/cluster/templates/
+# tenant-secrets.yaml out of version control entirely.
+/secrets.yaml
+/*-secrets.yaml
+.env
+.env.*
+
+# Test artifacts
+.playwright-mcp/
+clickstack-*.png

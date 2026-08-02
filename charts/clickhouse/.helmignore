@@ -1,25 +1,28 @@
 # Patterns to ignore when building packages.
-# This supports shell glob matching, relative path matching, and
-# negation (prefixed with !). Only one pattern per line.
-.DS_Store
-# Common VCS dirs
+# VCS
 .git/
 .gitignore
-.bzr/
-.bzrignore
-.hg/
-.hgignore
-.svn/
-# Common backup files
-*.swp
-*.bak
-*.tmp
-*~
-# Various IDEs
-.project
+# Test / session artifacts
+.playwright-mcp/
+*.png
+*.log
+dist/
+# Rendered output parked inside the chart. Helm loads every file under
+# templates/ and passes a plain YAML through untouched, so last render's output
+# becomes this render's template and the manifest doubles each time. It would
+# also be applied for real by helm install. Prefer redirecting to dist/ or /tmp;
+# these are the backstop. Subcharts do not inherit this file — charts/cluster
+# carries its own copy.
+rendered*.yaml
+out*.yaml
+manifest*.yaml
+*.rendered.yaml
+*.out.yaml
+# OS / IDE
+.DS_Store
 .idea/
-*.tmproj
-# img folder
-img/
-# Changelog
-CHANGELOG.md
+.vscode/
+*.swp
+*~
+# CI / docs not needed inside the package
+Makefile

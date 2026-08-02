@@ -1,62 +1,149 @@
-# Local-demo values for the vendored bitnami/clickhouse chart (charts/clickhouse,
-# see charts/clickhouse/SOURCE.txt). Single node/shard, modest storage for `kind`,
-# simplified auth. Install with:
+# Local-demo values for the vendored altinity-operator umbrella chart
+# (charts/clickhouse, see charts/clickhouse/SOURCE.txt).
 #
-#   helm install clickhouse charts/clickhouse -f deploy/values/clickhouse.yaml -n demo
+# Install with:
+#   helm upgrade --install clickhouse charts/clickhouse \
+#     -f deploy/values/clickhouse.yaml -n demo --create-namespace
 #
-# Credentials (documented explicitly per task 6.2 — deploy/base/rotel.yaml's
-# ClickHouse exporter env vars are hard-coded to match these same literal values):
+# Architecture (this chart, not Bitnami StatefulSet):
+#   - Altinity ClickHouse Operator (namespace-scoped Role in `demo`)
+#   - ClickHouseKeeperInstallation (1 replica for kind)
+#   - ClickHouseInstallation (1 shard × 1 replica)
+#   - Rotel OTLP collector + schema-init Job (replaces deploy/base/rotel.yaml)
+#
+# Service names are pinned so the rest of the demo keeps addressing:
+#   clickhouse:8123  — Grafana + any in-cluster client
+#   rotel:4317/4318  — frontend / backend / loadgen OTLP
+#
+# Credentials (must match Grafana datasource secureJsonData):
 #   username: default
 #   password: demo-clickhouse-pw
-#   database: otel (rotel's default database/table-prefix, created by the
-#     clickhouse-ddl schema-init Job in deploy/base/rotel.yaml)
-# This is a plaintext demo credential intentionally — fine for an ephemeral
-# `kind` cluster, not meant for anything resembling production use.
+#   database: otel / table prefix: otel  (rotel defaults + DDL Job)
+#
+# Plaintext demo credential intentionally — fine for an ephemeral kind cluster,
+# not for anything resembling production.
 
-## The chart's default `image.repository` (bitnami/clickhouse) now points at
-## Broadcom's paid "Bitnami Secure Images" registry; the tag this chart version
-## ships (25.7.5-debian-12-r0) does not exist there (confirmed via `docker pull`).
-## The free/community mirror is `bitnamilegacy/clickhouse`, confirmed pullable.
-## See charts/clickhouse/SOURCE.txt for details.
-global:
-  security:
-    allowInsecureImages: true
-
-image:
-  registry: docker.io
-  repository: bitnamilegacy/clickhouse
-  tag: 25.7.5-debian-12-r0
-
-## Single node, single shard — no replication needed for a demo, so ClickHouse
-## Keeper (used for replicated-table coordination) is unnecessary.
-shards: 1
-replicaCount: 1
-keeper:
-  enabled: false
-
-auth:
-  username: default
-  password: "demo-clickhouse-pw"
-
-persistence:
+# -----------------------------------------------------------------------------
+# Operator — watch only the release namespace (demo)
+# -----------------------------------------------------------------------------
+operator:
   enabled: true
-  size: 4Gi
+  watchNamespaces: []
+  rbac:
+    namespaceScoped: true
+  operator:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi
+  metrics:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 96Mi
 
-## Built-in Prometheus endpoint, scraped by VictoriaMetrics at clickhouse:8001
-## (see deploy/values/victoria-metrics.yaml). Off by chart default.
-metrics:
+# -----------------------------------------------------------------------------
+# Cluster — single-node kind profile
+# -----------------------------------------------------------------------------
+cluster:
   enabled: true
+  commonLabels:
+    environment: local
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
 
-resources:
-  requests:
-    cpu: 250m
-    memory: 512Mi
-  limits:
-    cpu: 1
-    memory: 1Gi
+  keeper:
+    replicas: 1
+    antiAffinity: false
+    podTemplate:
+      # kind has one node and no zone labels
+      topologyZoneKey: ""
+      nodeHostnameKey: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    persistence:
+      size: 5Gi
 
-## Chart defaults already enable readiness/liveness probes (see values.yaml
-## livenessProbe.enabled / readinessProbe.enabled) — left untouched here.
+  clickhouse:
+    replicas: 1
+    shards: 1
+    antiAffinity: false
+    podTemplate:
+      topologyZoneKey: ""
+      nodeHostnameKey: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      size: 10Gi
+    defaultUser:
+      password: "demo-clickhouse-pw"
+      autoGenerate: false
+    # Pin client Service name so Grafana/docs keep using host "clickhouse"
+    service:
+      enabled: true
+      name: clickhouse
+    settings:
+      extraConfig:
+        max_concurrent_queries: 50
+        max_server_memory_usage_to_ram_ratio: 0.9
+        background_pool_size: 16
+        background_merges_mutations_concurrency_ratio: 2
+        mark_cache_size: 536870912
+        uncompressed_cache_size: 1073741824
+        logger:
+          level: information
+          console: 1
+      # Drop production "reporter" user (needs an external Secret)
+      extraUsersConfig:
+        users:
+          reporter: null
+    containerTemplate:
+      env: []
+    clusterSecret:
+      enabled: false
 
-service:
-  type: ClusterIP
+  rotel:
+    enabled: true
+    # Service/Deployment name "rotel" — matches frontend/backend/loadgen targets
+    name: rotel
+    # Single-node: clusterAllReplicas auth + TTL hook not needed locally
+    manageTtl: false
+    telemetry:
+      traces: true
+      logs: false
+      metrics: false
+    # App metrics + rotel internal telemetry → VictoriaMetrics (same as the
+    # former deploy/base/rotel.yaml dual-exporter layout).
+    internalMetrics:
+      enabled: true
+      endpoint: http://victoria-metrics:8428/opentelemetry
+    exporter:
+      engine: MergeTree
+      cluster: default
+      databaseEngine: Atomic
+      database: otel
+      tablePrefix: otel
+      user: default
+      ttl: 24h
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi

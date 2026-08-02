@@ -1,774 +1,933 @@
-<!--- app-name: ClickHouse -->
+# clickhouse
 
-# Bitnami package for ClickHouse
+Production-oriented **all-in-one Helm chart** for ClickHouse on Kubernetes.
 
-ClickHouse is an open-source column-oriented OLAP database management system. Use it to boost your database performance while providing linear scalability and hardware efficiency.
+| Subchart | Source | Role |
+|----------|--------|------|
+| **operator** | [Altinity clickhouse-operator](https://github.com/Altinity/clickhouse-operator/blob/master/docs/quick_start.md) Helm chart, vendored at `charts/altinity-clickhouse-operator/` | Altinity operator + CRDs (`ClickHouseInstallation` / `ClickHouseKeeperInstallation`) |
+| **cluster** | Local (`charts/cluster`) | The CHI/CHK CRs, plus the [Rotel](https://github.com/rotel-dev/rotel) OTLP collector and its schema/TTL Jobs |
 
-[Overview of ClickHouse](https://clickhouse.com/)
+Default profile targets a **small-business production** footprint: HA without over-sharding.
 
-Trademarks: This software listing is packaged by Bitnami. The respective trademarks mentioned in the offering are owned by the respective companies, and use of them does not imply any affiliation or endorsement.
+## Architecture
 
-## TL;DR
-
-```console
-helm install my-release oci://registry-1.docker.io/bitnamicharts/clickhouse
+```
+                    ┌─────────────────────────────────────┐
+                    │         clickhouse (umbrella)       │
+                    │  values.yaml  (small-biz production)│
+                    └──────────────┬──────────────────────┘
+                                   │
+           ┌───────────────────────┼───────────────────────┐
+           ▼                                               ▼
+ ┌─────────────────────┐                     ┌──────────────────────────┐
+ │ operator (Altinity) │                     │ cluster (local subchart) │
+ │ CRDs + controller   │  reconciles ──────► │ CHK Keeper (3)           │
+ │ metrics exporter    │                     │ CHI ClickHouse (1×3)     │
+ └─────────────────────┘                     └──────────────────────────┘
+                                             │ rotel Deployment + Svc   │
+                                             │ DDL Job / TTL Job        │
+                                             └──────────────────────────┘
 ```
 
-> Tip: Did you know that this app is also available as a Kubernetes App on the Azure Marketplace? Kubernetes Apps are the easiest way to deploy Bitnami on AKS. Click [here](https://azuremarketplace.microsoft.com/en-us/marketplace/apps/bitnami.clickhouse-cnab) to see the listing on Azure Marketplace.
+**Default topology**
 
-Looking to use ClickHouse in production? Try [VMware Tanzu Application Catalog](https://bitnami.com/enterprise), the commercial edition of the Bitnami catalog.
+| Component | Count | CPU (req–lim) | Memory (req–lim) | Disk / pod |
+|-----------|-------|---------------|------------------|------------|
+| ClickHouse Keeper | 3 | 500m–1 | 1–2 Gi | 20 Gi |
+| ClickHouse server | 3 (1 shard) | 2–4 | 8–16 Gi | 200 Gi |
+| Rotel collector | 1 | 50m–500m | 128–512 Mi | — |
+| Operator manager | 1 | 50m–500m | 128–256 Mi | — |
 
-## ⚠️ Important Notice: Upcoming changes to the Bitnami Catalog
+Total rough floor: **~7.6 CPU / ~27 Gi RAM / ~660 Gi storage** (plus headroom for merges/queries).
 
-Beginning August 28th, 2025, Bitnami will evolve its public catalog to offer a curated set of hardened, security-focused images under the new [Bitnami Secure Images initiative](https://news.broadcom.com/app-dev/broadcom-introduces-bitnami-secure-images-for-production-ready-containerized-applications). As part of this transition:
+**Images** are pinned explicitly in `values.yaml` as `registry` / `repository` / `tag`,
+so a mirror is a one-key override and no tag floats:
 
-- Granting community users access for the first time to security-optimized versions of popular container images.
-- Bitnami will begin deprecating support for non-hardened, Debian-based software images in its free tier and will gradually remove non-latest tags from the public catalog. As a result, community users will have access to a reduced number of hardened images. These images are published only under the “latest” tag and are intended for development purposes
-- Starting August 28th, over two weeks, all existing container images, including older or versioned tags (e.g., 2.50.0, 10.6), will be migrated from the public catalog (docker.io/bitnami) to the “Bitnami Legacy” repository (docker.io/bitnamilegacy), where they will no longer receive updates.
-- For production workloads and long-term support, users are encouraged to adopt Bitnami Secure Images, which include hardened containers, smaller attack surfaces, CVE transparency (via VEX/KEV), SBOMs, and enterprise support.
-
-These changes aim to improve the security posture of all Bitnami users by promoting best practices for software supply chain integrity and up-to-date deployments. For more details, visit the [Bitnami Secure Images announcement](https://github.com/bitnami/containers/issues/83267).
-
-## Introduction
-
-Bitnami charts for Helm are carefully engineered, actively maintained and are the quickest and easiest way to deploy containers on a Kubernetes cluster that are ready to handle production workloads.
-
-This chart bootstraps a [ClickHouse](https://github.com/clickhouse/clickhouse) Deployment in a [Kubernetes](https://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.
+| Image | Default |
+|-------|---------|
+| ClickHouse server / Keeper | `docker.io/clickhouse/clickhouse-{server,keeper}:26.7.1.1315` |
+| Operator | `altinity/clickhouse-operator:0.27.2` + `altinity/metrics-exporter:0.27.2` |
+| Rotel + DDL tool | `docker.io/streamfold/rotel{,-clickhouse-ddl}:v0.2.2` |
 
 ## Prerequisites
 
-- Kubernetes 1.23+
-- Helm 3.8.0+
-- PV provisioner support in the underlying infrastructure
-- ReadWriteMany volumes for deployment scaling
-
-> If you are using Kubernetes 1.18, the following code needs to be commented out.
-> seccompProfile:
-> type: "RuntimeDefault"
-
-## Installing the Chart
-
-To install the chart with the release name `my-release`:
-
-```console
-helm install my-release oci://REGISTRY_NAME/REPOSITORY_NAME/clickhouse
-```
-
-> Note: You need to substitute the placeholders `REGISTRY_NAME` and `REPOSITORY_NAME` with a reference to your Helm chart registry and repository. For example, in the case of Bitnami, you need to use `REGISTRY_NAME=registry-1.docker.io` and `REPOSITORY_NAME=bitnamicharts`.
-
-The command deploys ClickHouse on the Kubernetes cluster in the default configuration. The [Parameters](#parameters) section lists the parameters that can be configured during installation.
-
-> **Tip**: List all releases using `helm list`
-
-## Configuration and installation details
-
-### Resource requests and limits
-
-Bitnami charts allow setting resource requests and limits for all containers inside the chart deployment. These are inside the `resources` value (check parameter table). Setting requests is essential for production workloads and these should be adapted to your specific use case.
-
-To make this process easier, the chart contains the `resourcesPreset` values, which automatically sets the `resources` section according to different presets. Check these presets in [the bitnami/common chart](https://github.com/bitnami/charts/blob/main/bitnami/common/templates/_resources.tpl#L15). However, in production workloads using `resourcesPreset` is discouraged as it may not fully adapt to your specific needs. Find more information on container resource management in the [official Kubernetes documentation](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/).
-
-### Prometheus metrics
-
-This chart can be integrated with Prometheus by setting `metrics.enabled` to `true`. This will expose Clickhouse native Prometheus endpoint in the service. It will have the necessary annotations to be automatically scraped by Prometheus.
-
-#### Prometheus requirements
-
-It is necessary to have a working installation of Prometheus or Prometheus Operator for the integration to work. Install the [Bitnami Prometheus helm chart](https://github.com/bitnami/charts/tree/main/bitnami/prometheus) or the [Bitnami Kube Prometheus helm chart](https://github.com/bitnami/charts/tree/main/bitnami/kube-prometheus) to easily have a working Prometheus in your cluster.
-
-#### Integration with Prometheus Operator
-
-The chart can deploy `ServiceMonitor` objects for integration with Prometheus Operator installations. To do so, set the value `metrics.serviceMonitor.enabled=true`. Ensure that the Prometheus Operator `CustomResourceDefinitions` are installed in the cluster or it will fail with the following error:
-
-```text
-no matches for kind "ServiceMonitor" in version "monitoring.coreos.com/v1"
-```
-
-Install the [Bitnami Kube Prometheus helm chart](https://github.com/bitnami/charts/tree/main/bitnami/kube-prometheus) for having the necessary CRDs and the Prometheus Operator.
-
-### [Rolling VS Immutable tags](https://techdocs.broadcom.com/us/en/vmware-tanzu/application-catalog/tanzu-application-catalog/services/tac-doc/apps-tutorials-understand-rolling-tags-containers-index.html)
-
-It is strongly recommended to use immutable tags in a production environment. This ensures your deployment does not change automatically if the same tag is updated with a different image.
-
-Bitnami will release a new chart updating its containers if a new version of the main container, significant changes, or critical vulnerabilities exist.
-
-### Update credentials
-
-Bitnami charts configure credentials at first boot. Any further change in the secrets or credentials require manual intervention. Follow these instructions:
-
-- Update the user password following [the upstream documentation](https://clickhouse.com/docs/en/sql-reference/statements/alter/user)
-- Update the password secret with the new values (replace the SECRET_NAME, and PASSWORD placeholders)
-
-```shell
-kubectl create secret generic SECRET_NAME --from-literal=admin-password=PASSWORD --dry-run -o yaml | kubectl apply -f -
-```
-
-### ClickHouse Keeper
-
-By default, this chart deploys ClickHouse Keeper, a lightweight and easy-to-use alternative to Zookeeper as an independent StatefulSet. This is mandatory if you're using more than 1 ClickHouse replica or sharding.
-
-### External Zookeeper support
-
-You may want to have ClickHouse connect to an external Zoo[Keeper] rather than installing ClickHouse Keeper inside your cluster. Typical reasons for this are to use a managed database service, or to share a common database server for all your applications. To achieve this, the chart allows you to specify credentials for an external database with the [`externalZookeeper` parameter](#parameters). You should also disable the ClickHouse Keeper installation with the `keeper.enabled` option. Here is an example:
-
-```console
-keeper.enabled=false
-externalZookeeper.servers[0]=myexternalhost
-externalZookeeper.port=2888
-```
-
-### Configuring ClickHouse
-
-ClickHouse configuration can be extended on two different ways:
-
-- Using the `configuration` parameter you can override the default configuration file (`config.xml`) with your own configuration. Alternatively, you can use the `existingConfigmap` parameter to load a custom configuration file from a ConfigMap.
-- Using the `configdFiles` and `usersdFiles` parameters you can add extra configuration files to be mounted at `config.d` and `users.d` respectively (refer to [upstream documentation to learn more about these configuration files](https://clickhouse.com/docs/operations/configuration-files). Alternatively, you can use the `existingConfigdConfigmap` and `existingUsersdConfigmap` parameters to load custom configuration files from ConfigMaps.
-
-> Note: please note the chart already mounts by default a series of configuration files auto-generated based on other values at `config.d`. These files are prefixed with `01-`, `02-`, etc. up to `06-`. If you want to override these files, ensure you add a prefix with a higher number (e.g. `99-`) to your custom configuration files. Otherwise, the default configuration files will override your custom ones.
-
-### Ingress
-
-This chart provides support for Ingress resources. If you have an ingress controller installed on your cluster, such as [nginx-ingress-controller](https://github.com/bitnami/charts/tree/main/bitnami/nginx-ingress-controller) or [contour](https://github.com/bitnami/charts/tree/main/bitnami/contour) you can utilize the ingress controller to serve your application.To enable Ingress integration, set `ingress.enabled` to `true`.
-
-The most common scenario is to have one host name mapped to the deployment. In this case, the `ingress.hostname` property can be used to set the host name. The `ingress.tls` parameter can be used to add the TLS configuration for this host.
-
-However, it is also possible to have more than one host. To facilitate this, the `ingress.extraHosts` parameter (if available) can be set with the host names specified as an array. The `ingress.extraTLS` parameter (if available) can also be used to add the TLS configuration for extra hosts.
-
-> NOTE: For each host specified in the `ingress.extraHosts` parameter, it is necessary to set a name, path, and any annotations that the Ingress controller should know about. Not all annotations are supported by all Ingress controllers, but [this annotation reference document](https://github.com/kubernetes/ingress-nginx/blob/master/docs/user-guide/nginx-configuration/annotations.md) lists the annotations supported by many popular Ingress controllers.
-
-Adding the TLS parameter (where available) will cause the chart to generate HTTPS URLs, and the  application will be available on port 443. The actual TLS secrets do not have to be generated by this chart. However, if TLS is enabled, the Ingress record will not work until the TLS secret exists.
-
-[Learn more about Ingress controllers](https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/).
-
-### Securing traffic using TLS
-
-This chart supports encrypting communications with ClickHouse using TLS. To enable this feature, set the `tls.enabled`.
-
-It is necessary to create a secret containing the TLS certificates and pass it to the chart via the `tls.existingCASecret` and `tls.server.existingSecret` parameters. Every secret should contain a `tls.crt` and `tls.key` keys including the certificate and key files respectively. For example: create the CA secret with the certificates files:
-
-```console
-kubectl create secret generic ca-tls-secret --from-file=./tls.crt --from-file=./tls.key
-```
-
-You can manually create the required TLS certificates or relying on the chart auto-generation capabilities. The chart supports two different ways to auto-generate the required certificates:
-
-- Using Helm capabilities. Enable this feature by setting `tls.autoGenerated.enabled` to `true` and `tls.autoGenerated.engine` to `helm`.
-- Relying on CertManager (please note it's required to have CertManager installed in your K8s cluster). Enable this feature by setting `tls.autoGenerated.enabled` to `true` and `tls.autoGenerated.engine` to `cert-manager`. Please note it's supported to use an existing Issuer/ClusterIssuer for issuing the TLS certificates by setting the `tls.autoGenerated.certManager.existingIssuer` and `tls.autoGenerated.certManager.existingIssuerKind` parameters.
-
-### Additional environment variables
-
-In case you want to add extra environment variables (useful for advanced operations like custom init scripts), you can use the `extraEnvVars` property.
+1. **Kubernetes** ≥ 1.25 (Altinity operator 0.16+)
+2. **Helm** ≥ 3.8
+3. A **StorageClass** suitable for databases (SSD, expandable). Set:
 
 ```yaml
-clickhouse:
-  extraEnvVars:
-    - name: LOG_LEVEL
-      value: error
+cluster:
+  keeper:
+    persistence:
+      storageClassName: gp3   # EKS example
+  clickhouse:
+    persistence:
+      storageClassName: gp3
 ```
 
-Alternatively, you can use a ConfigMap or a Secret with the environment variables. To do so, use the `extraEnvVarsCM` or the `extraEnvVarsSecret` values.
+## Install
 
-### Sidecars
+### Local kind / single-node
 
-If additional containers are needed in the same pod as ClickHouse (such as additional metrics or logging exporters), they can be defined using the `sidecars` parameter.
+```bash
+make deps
+make install VALUES=values-local.yaml PASSWORD='localdev'
+kubectl -n clickhouse get chi,chk,pods
+kubectl -n clickhouse exec deploy/chi-ch-aio-cluster-default-0-0 -- \
+  clickhouse-client --password localdev -q 'SELECT version()'
+# or the StatefulSet pod:
+kubectl -n clickhouse exec chi-ch-aio-cluster-default-0-0-0 -- \
+  clickhouse-client --password localdev -q 'SELECT version()'
+```
+
+`values-local.yaml` drops anti-affinity, uses 1 Keeper + 1 ClickHouse replica, smaller disks, and skips the rotel TTL hook (single-node `clusterAllReplicas` auth).
+
+### Production
+
+```bash
+# From this repo root
+helm dependency update   # or: make deps
+helm lint .
+
+# Production (small business defaults)
+helm upgrade --install ch-aio . \
+  --namespace clickhouse \
+  --create-namespace \
+  --set cluster.clickhouse.defaultUser.password='CHANGE_ME_STRONG'
+
+# Recommended first install (avoids CRD readiness race):
+#   make install-operator VALUES=values.yaml
+#   make install-cluster  VALUES=values.yaml PASSWORD='CHANGE_ME_STRONG'
+
+# Or use an existing Secret
+kubectl -n clickhouse create secret generic ch-default-password \
+  --from-literal=password='CHANGE_ME_STRONG'
+helm upgrade --install ch-aio . -n clickhouse \
+  --set cluster.clickhouse.defaultUser.existingSecret=ch-default-password \
+  --set cluster.clickhouse.defaultUser.autoGenerate=false
+```
+
+### Dev / local cluster
+
+The defaults size for production. On kind/k3d/minikube, shrink the request, drop
+to a single replica, and clear the two placement keys — a one-node cluster has
+no zone labels and cannot give each pod its own node:
+
+```bash
+helm upgrade --install ch-aio . -n clickhouse --create-namespace \
+  --set cluster.clickhouse.replicas=1 \
+  --set cluster.keeper.replicas=1 \
+  --set cluster.clickhouse.resources.requests.cpu=500m \
+  --set cluster.clickhouse.resources.requests.memory=1Gi \
+  --set cluster.clickhouse.persistence.size=20Gi \
+  --set cluster.keeper.persistence.size=5Gi \
+  --set cluster.clickhouse.podTemplate.topologyZoneKey="" \
+  --set cluster.clickhouse.podTemplate.nodeHostnameKey="" \
+  --set cluster.keeper.podTemplate.topologyZoneKey="" \
+  --set cluster.keeper.podTemplate.nodeHostnameKey="" \
+  --set cluster.clickhouse.defaultUser.password='devpass'
+```
+
+With `replicas=1` the spread constraint is harmless, but `nodeHostnameKey` still
+has to go the moment you raise it above the node count.
+
+`keeper.replicas` cannot be changed after the first successful deploy, so pick
+1 (local) or 3 (production) up front.
+
+### Optional TLS
+
+Mutual TLS for ClickHouse ↔ Keeper and client connections. Provide a
+cert-manager `Issuer` / `ClusterIssuer`, then:
+
+```bash
+helm upgrade --install ch-aio . -n clickhouse \
+  --set cluster.tls.enabled=true \
+  --set cluster.tls.issuerRef.name=local-issuer \
+  --set cluster.tls.issuerRef.kind=Issuer
+```
+
+## Verify
+
+```bash
+kubectl get pods,chi,chk -n clickhouse
+kubectl get chi,chk -n clickhouse -o wide
+
+# Client
+kubectl exec -it -n clickhouse <clickhouse-pod> -- clickhouse-client
+```
+
+## Configuration highlights
+
+| Key | Default | Notes |
+|-----|---------|--------|
+| `operator.enabled` | `true` | Set `false` if operator is already cluster-wide |
+| `cluster.keeper.replicas` | `3` | **Odd only; do not change after first deploy** |
+| `cluster.clickhouse.replicas` | `3` | Each replica holds the full dataset |
+| `cluster.clickhouse.shards` | `1` | **Leave at 1** — see "Scaling path" |
+| `cluster.clickhouse.persistence.size` | `200Gi` | Per replica |
+| `cluster.clickhouse.persistence.perReplica` | `[]` | Per-replica StorageClass / size overrides |
+| `cluster.clickhouse.resources` | 2–4 CPU / 8–16Gi | Tune to node size |
+| `cluster.tls.enabled` | `false` | Needs cert-manager + an Issuer |
+| `cluster.rotel.enabled` | `true` | OTLP collector (traces/logs → ClickHouse) |
+| `cluster.rotel.telemetry.{traces,logs,metrics}` | `true/true/false` | Off also closes that OTLP receiver |
+| `cluster.rotel.exporter.tablePrefix` | `otel` | Tables are `<prefix>_traces` / `<prefix>_logs` |
+| `cluster.rotel.exporter.{traces,logs}.tablePrefix` | `""` | Per-signal override; empty inherits the above |
+| `cluster.rotel.autoscaling.enabled` | `false` | HPA on the collector; needs metrics-server |
+| `cluster.rotel.logFormat` | `json` | Agent stdout: `text` or `json` |
+| `cluster.rotel.internalMetrics.enabled` | `false` | Rotel runtime metrics → VictoriaMetrics |
+| `cluster.rotel.internalMetrics.endpoint` | `""` | VM OTLP base URL (Rotel appends `/v1/metrics`) |
+| `cluster.rotel.exporter.engine` | `ReplicatedMergeTree` | `MergeTree` for single replica |
+| `cluster.rotel.exporter.databaseEngine` | `Replicated` | Keeps a new replica's table UUIDs aligned |
+| `cluster.rotel.exporter.ttl` | `168h` | Retention; `<n><s\|m\|h\|d>`, `0s` = forever |
+| `cluster.rotel.manageTtl` | `true` | Re-apply `ttl` to existing tables on upgrade |
+| `operator.rbac.namespaceScoped` | `true` | Role instead of ClusterRole |
+| `operator.watchNamespaces` | `[clickhouse]` | Must equal the release namespace |
+| `cluster.clickhouse.settings.extraUsersConfig` | `reporter` | Users, profiles, row filters |
+| `cluster.*.podTemplate.topologyZoneKey` | `topology.kubernetes.io/zone` | Domain replicas spread across |
+| `cluster.*.podTemplate.nodeHostnameKey` | `kubernetes.io/hostname` | One pod per node; excess stay `Pending` |
+| `cluster.*.podTemplate.topologySpreadConstraints` | `[]` | Operator field; merges by `topologyKey` |
+
+Full knobs: `values.yaml` and `charts/cluster/values.yaml`.
+
+### Why the otel database is Replicated
+
+`cluster.rotel.exporter.databaseEngine` defaults to `Replicated`, which is what
+makes adding a replica safe.
+
+The table path is `/clickhouse/tables/{uuid}/{shard}`, so two servers are
+replicas of one table only when they agree on its UUID. `ON CLUSTER` gives them
+a shared UUID *when they all run the same CREATE* — it does not backfill the
+original UUID later. Under an `Atomic` database a brand-new replica therefore
+starts empty, and the next `CREATE TABLE IF NOT EXISTS` run gives it a fresh
+UUID: a second table under a different Keeper path that the others never
+replicate to. Writes split silently, with both tables reporting healthy.
+
+The `Replicated` engine writes each DDL statement to a Keeper log that every
+member replays, so a new replica inherits the schema *with the original UUIDs*
+and starts replicating immediately. It is also the only thing the operator's
+`enableDatabaseSync` supports, and the same engine the operator gives its own
+`default` database.
+
+Consequences worth knowing:
+
+- `rotel.exporter.cluster` must be set. The `CREATE DATABASE` still runs
+  `ON CLUSTER` so every host joins; only the statements after it are replicated.
+- The DDL tool runs without `--cluster` and the TTL job without `ON CLUSTER`.
+  Both would otherwise hand each host a statement the database engine is
+  already going to deliver.
+- `engine` must be `ReplicatedMergeTree`. Replicating DDL to hosts that each
+  keep their own copy of the data is not replication, so the chart rejects the
+  combination.
+
+Check it landed with the CR's own condition:
+
+```bash
+kubectl get chi <name> -o wide   # STATUS=Completed when hosts are ready
+# ReplicasInSync / "All replicas are in sync"
+```
+
+**Migrating an existing install.** A database engine cannot be changed in place,
+and `CREATE DATABASE IF NOT EXISTS` keeps whatever is already there — so setting
+this on a running cluster does nothing on its own. The DDL job compares the two
+and warns in its log rather than failing the upgrade. To convert, copy the data
+out, drop the database on **every** replica, let the job recreate it, and copy
+back:
+
+```sql
+CREATE DATABASE otel_old ENGINE = Atomic;         -- on one replica
+CREATE TABLE otel_old.otel_traces AS otel.otel_traces;
+INSERT INTO otel_old.otel_traces SELECT * FROM otel.otel_traces;
+-- repeat per table, DROP DATABASE otel SYNC on every replica, helm upgrade,
+-- then INSERT INTO otel.otel_traces SELECT * FROM otel_old.otel_traces
+```
+
+If a replica already holds an `Atomic` database of that name — a reused volume
+from an earlier scale-out, say — the sync cannot proceed and the operator
+reports `SchemaInSync: False` with `DatabasesNotCreated`. Dropping the stale
+database on that replica lets the operator recreate it with the right engine.
+
+### Retention (TTL)
+
+Set `cluster.rotel.exporter.ttl` — a number plus `s`, `m`, `h` or `d`, with
+`0s` meaning keep forever:
+
+```bash
+helm upgrade ch-aio . -n clickhouse --set cluster.rotel.exporter.ttl=30d
+```
+
+The DDL tool only writes TTL when it **creates** a table, so on an existing
+install that value alone changes nothing. `cluster.rotel.manageTtl` (default on)
+adds a post-upgrade Job that re-applies it with `ALTER TABLE ... MODIFY TTL`,
+which is what makes the value adjustable after the first install.
+
+The job reuses each table's own TTL expression — `Timestamp` for spans,
+`TimestampTime` for logs, `Start` for the trace-id index — so it stays correct
+if the DDL tool's schema changes, and falls back to those columns by table
+suffix when a table currently has no TTL (otherwise `0s` would be a one-way
+door). It then reads the result back from every replica through
+`clusterAllReplicas` and exits non-zero on a mismatch, so a replica that was
+restarting during the upgrade is picked up by the Job's retry rather than
+silently left on the old retention.
+
+The otel tables carry `ttl_only_drop_parts = 1`: whole parts are dropped once
+every row in them has expired, instead of rewriting parts to delete rows.
+Retention is therefore granular to the partition, which is one day.
+
+To retain traces and logs for different periods, turn `manageTtl` off and run
+the `ALTER TABLE ... MODIFY TTL` statements yourself — the chart drives a single
+value for every table.
+
+### Operator RBAC scope
+
+`operator.rbac.namespaceScoped: true` gives the operator a Role/RoleBinding in its
+own namespace instead of a ClusterRole, so it can only touch StatefulSets,
+Secrets, PVCs and custom resources there. Two consequences:
+
+- **The cluster must live in the operator's namespace.** Both `make
+  install-operator` and `make install-cluster` use `NAMESPACE` for exactly this
+  reason.
+- **`controller.watchNamespaces` must list that namespace.** An empty list means
+  cluster-wide, which a namespaced Role cannot serve — the operator reconciles
+  nothing and only logs permission errors. The chart fails to render on that
+  mismatch rather than letting it reach the cluster.
+
+Two ClusterRoles remain when `metrics.secure` is on; they cover only the
+`TokenReview`/`SubjectAccessReview` calls that authenticate metrics scrapes.
+
+To manage clusters across several namespaces, set `operator.rbac.namespaceScoped:
+false` and either list them in `watchNamespaces` or leave it empty for
+cluster-wide.
+
+### ClickHouse users
+
+There is one mechanism: `cluster.clickhouse.settings.extraUsersConfig`, passed
+through to the operator verbatim. A user is a profile, a set of grants, and
+optionally a per-table row filter.
+
+| | Sees |
+|---|---|
+| grant, no filter | the **whole** table |
+| grant + filter | only the rows matching the filter |
+| no grant | nothing — `ACCESS_DENIED`, whatever the filters say |
+
+Grants are table- and column-level; they cannot express "these rows". Row
+filtering is a separate concept and lives under `databases.<db>.<table>.filter`.
+
+`values.yaml` carries a `reporter` user reading the otel tables in full, and a
+commented `team_a` showing the same grants narrowed to one Kubernetes namespace.
+Both hang off a shared `readonly_user` profile with `readonly: 1` plus memory,
+runtime and result-size ceilings.
+
+If the list outgrows `values.yaml`, split it into a second values file and pass
+both with `-f`. That is the only place the split can happen — the operator
+cannot source users from a ConfigMap or Secret, since its `externalSecret` field
+carries cluster secrets only.
+
+**Grants and filters are yours to keep in step.** A granted table with no filter
+entry returns **every** row — that is the one mistake worth re-reading the file
+for. `otel_traces_trace_id_ts` is never granted: it holds only trace ids and
+timestamps, so there is nothing to filter on.
+
+**Row policies do not leak between users.** They are created with
+`apply_to_all = 0` and bind only the users they name, so a whole-table reader is
+unaffected by another user's filter. Verify with:
+
+```sql
+SELECT name, apply_to_all, apply_to_list FROM system.row_policies
+```
+
+**The namespace has to be on the telemetry.** Rotel does not enrich spans with
+Kubernetes metadata, so instrumented workloads must publish it themselves:
 
 ```yaml
-sidecars:
-- name: your-image-name
-  image: your-image
-  imagePullPolicy: Always
-  ports:
-  - name: portname
-    containerPort: 1234
+env:
+  - name: POD_NAMESPACE
+    valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+  - name: OTEL_RESOURCE_ATTRIBUTES
+    value: k8s.namespace.name=$(POD_NAMESPACE)
 ```
 
-If these sidecars export extra ports, extra port definitions can be added using the `service.extraPorts` parameter (where available), as shown in the example below:
+Rows missing the attribute match no filter and stay invisible to every scoped
+user.
+
+**Passwords come from Secrets you create.** The chart generates none for these
+users; each password is injected as container env and read back with
+`@from_env`, so it reaches neither the CR nor
+`preprocessed_configs/users.xml`. The Secret must exist **before** the upgrade —
+a missing one leaves every ClickHouse pod in `CreateContainerConfigError`, not
+just that user disabled. Rotating a password needs a pod restart, since env is
+fixed at container start.
+
+**Config-defined users are read-only at runtime.** Granting another table later
+means editing the file and running `helm upgrade`; a `GRANT` statement against a
+config-sourced user is rejected. Check what is actually loaded, and from where,
+with:
+
+```sql
+SHOW CREATE USER reporter;
+SELECT name, storage FROM system.settings_profiles;
+SELECT user_name, inherit_profile FROM system.settings_profile_elements
+WHERE user_name IS NOT NULL;
+```
+
+`storage = users_xml` marks the ones this chart manages; anything else was
+created by hand with SQL and will not survive a cluster rebuild.
+
+### A different StorageClass per replica
+
+The CRD carries one `dataVolumeClaimSpec` for the whole cluster, so the operator
+cannot vary storage per replica. It does create **one StatefulSet per replica**
+with a deterministic claim name, though, and a StatefulSet adopts a claim that
+already carries that name without comparing its StorageClass against the
+template. `cluster.clickhouse.persistence.perReplica` pre-creates those claims:
 
 ```yaml
-service:
-  extraPorts:
-  - name: extraPort
-    port: 11311
-    targetPort: 11311
+cluster:
+  clickhouse:
+    persistence:
+      storageClassName: standard-ssd    # every replica not listed below
+      size: 200Gi
+      perReplica:
+        - replica: 0
+          storageClassName: fast-nvme
+        - replica: 1
+          storageClassName: standard-ssd
+          size: 500Gi
 ```
 
-> NOTE: This Helm chart already includes sidecar containers for the Prometheus exporters (where applicable). These can be activated by adding the `--enable-metrics=true` parameter at deployment time. The `sidecars` parameter should therefore only be used for any extra sidecar containers.
+Rendered name: `clickhouse-storage-volume-<clickhouseName>-clickhouse-<shard>-<replica>-0`.
+The chart rejects a replica or shard index outside the configured counts and a
+pair claimed twice, so a typo cannot silently leave the StatefulSet to create
+its own claim from the template.
 
-If additional init containers are needed in the same pod, they can be defined using the `initContainers` parameter. Here is an example:
+**The cluster name has to stay short.** The operator caps a StatefulSet name at
+63 characters and, past that, shortens the middle and splices in a hash — a
+50-character cluster name produces `<name>-cli-7215-0-0`, not
+`<name>-clickhouse-0-0`. The predicted claim would then belong to no
+StatefulSet, and the real one would quietly build its own on the default
+StorageClass. The chart refuses to render in that case; keep the name
+(`<release>-cluster`, or `cluster.fullnameOverride` / `clickhouse.name`) at
+**48 characters or fewer** for a single-digit shard and replica index. The
+operator itself gives up entirely somewhere past ~52 characters, where the
+`<name>-clickhouse` label it applies exceeds 63 bytes and reconcile fails.
+
+Ordering is the whole trick — the claim has to exist before the operator creates
+the StatefulSet. The PVCs sync in wave 2, one ahead of the `CHI`,
+and a plain `helm install` gets it from Helm's own kind ordering, which puts
+`PersistentVolumeClaim` ahead of custom resources.
+
+Two things to know before using it. The claims carry
+`helm.sh/resource-policy: keep`, so `helm uninstall` leaves them behind — unlike
+operator-created claims they would otherwise be deleted with the release, taking
+the data. And a `size` change here never reaches a claim that already exists;
+expand it with `kubectl patch pvc` instead.
+
+Worth doing only when the replicas are **deliberately** asymmetric — a cold
+replica kept for backups, say. ClickHouse replication assumes comparable
+hardware, and rotel writes through the headless Service, so a slower replica
+both lags on merges and still serves its share of queries.
+
+### Pod scheduling and naming
+
+Every pod the chart is responsible for takes `nodeSelector`, `tolerations` and
+`affinity`. `values.yaml` carries a commented example for each.
+
+| Pod | Scheduling | Labels / annotations |
+|-----|------------|----------------------|
+| Keeper | `cluster.keeper.podTemplate.*` | `cluster.keeper.{labels,annotations}` |
+| ClickHouse server | `cluster.clickhouse.podTemplate.*` | `cluster.clickhouse.{labels,annotations}` |
+| Version-probe Job | `cluster.clickhouse.versionProbe.nodeSelector` — **`nodeSelector` only**, the CRD has no tolerations or affinity field | `cluster.clickhouse.versionProbe.{labels,annotations}` |
+| Rotel collector | `cluster.rotel.{nodeSelector,tolerations,affinity}` | `cluster.rotel.{podLabels,podAnnotations}` |
+| Schema + TTL Jobs | `cluster.rotel.jobs.{nodeSelector,tolerations,affinity}` | `cluster.rotel.jobs.{podLabels,podAnnotations}` |
+| Operator manager | `operator.manager.{nodeSelector,tolerations,affinity}` | — |
+
+The split in that table is not cosmetic. Keeper and ClickHouse pods are created
+by the operator, not by the chart, and **neither CRD's `podTemplate` has a
+`labels` or `annotations` field**. A structural CRD schema prunes unknown fields
+without raising an error, so metadata set there is dropped between `kubectl` and
+etcd — visible nowhere, and easy to mistake for the operator ignoring it. The
+operator's actual hook is `spec.labels` / `spec.annotations` on the CR, which it
+merges into everything it creates for that cluster: StatefulSets, Pods, the
+headless Service, ConfigMaps, Secrets, PodDisruptionBudgets. That is what
+`cluster.{keeper,clickhouse}.{labels,annotations}` set. Setting them under
+`podTemplate` fails the render with a pointer to the right key.
+
+`cluster.commonLabels` feeds the same `spec.labels`, so a label set once at the
+chart level now reaches the operator-managed resources too, not just the
+chart-managed ones. Per-component `labels` are merged on top and win on a key
+collision; operator-owned labels (`clickhouse.altinity.com/*`) win over both.
+
+Two cautions. Both fields land in the StatefulSet pod template, so changing them
+rolls the pods — they do **not** enter `spec.selector`, so a live cluster does
+accept the change. And the operator also stamps annotations onto the
+StatefulSet's `volumeClaimTemplates`, which Kubernetes treats as immutable.
+
+Two scheduling traps worth naming. A `nodeSelector` alone will not place a pod on
+a **tainted** node — pair it with tolerations. And the schema/TTL Jobs are helm
+hooks, so one that can never schedule blocks the whole `helm upgrade` until it
+times out; give them the same tolerations as the database nodes they talk to.
+
+Names default to `<release>-cluster` — the two CRs, the rotel
+Deployment/Service/Jobs, the generated password Secret and the per-replica PVCs
+all derive from it.
+
+| Key | Renames | Safe to change later? |
+|-----|---------|-----------------------|
+| `cluster.fullnameOverride` | all of the above, together | Yes on paper, but the operator reads the new CR as a different cluster |
+| `cluster.nameOverride` | the same names, **plus `app.kubernetes.io/name`** | **No — install-time only** |
+| `cluster.clickhouse.name` | the ClickHouseInstallation (CHI) CR and the per-replica PVCs | No |
+| `cluster.keeper.name` | the ClickHouseKeeperInstallation (CHK) CR | No |
+| `cluster.rotel.name` | the collector Deployment/Service/Jobs | Only by repointing every SDK |
+
+`nameOverride` is the one to be careful with: `app.kubernetes.io/name` is a
+selector label, and a Deployment's `spec.selector` is immutable, so changing it
+on a live release fails the upgrade until the rotel Deployment is deleted by
+hand. `fullnameOverride` leaves the labels alone.
+
+`clickhouse.name` and `keeper.name` are independent — setting one and not the
+other splits a pair the official examples keep matching, and the collector's
+exporter endpoint follows the ClickHouse one.
+
+### Replica placement
+
+The operator derives scheduling rules from two keys rather than taking a raw pod
+spec. Both are at the values its
+[CHI/CHK custom resource docs](https://github.com/Altinity/clickhouse-operator/blob/master/docs/custom_resource_explained.md)
+recommends:
+
+| Key | Default | Operator emits |
+|-----|---------|----------------|
+| `topologyZoneKey` | `topology.kubernetes.io/zone` | **required** TopologySpreadConstraint (`maxSkew: 1`, `DoNotSchedule`) + **preferred** PodAntiAffinity |
+| `nodeHostnameKey` | `kubernetes.io/hostname` | **required** PodAntiAffinity across every pod of the cluster — one per node, regardless of shard |
+
+They answer different questions. `topologyZoneKey` is *balance* — spread the
+replicas of one shard evenly over failure domains. `nodeHostnameKey` is
+*exclusion* — never put two pods of this cluster on one machine, whatever the
+skew says. Setting both is the whole of the official HA recipe; the docs call it
+"pods across availability zones **without manual affinity rules**".
+
+Fewer zones than replicas is **not** a problem: `maxSkew: 1` allows several
+replicas per domain, still evenly balanced. What does strand pods is a node
+carrying no zone label at all (a `DoNotSchedule` constraint skips it) or
+`nodeHostnameKey` on a cluster with fewer nodes than replicas.
+
+**Which of the two you can loosen afterwards is not symmetric.** The API
+reference words the two escape hatches differently, and the difference is load
+bearing:
+
+| Field | Interaction with the operator's own rules |
+|-------|-------------------------------------------|
+| `topologySpreadConstraints` | *merged by `topologyKey`* — repeat `topologyZoneKey`'s value and your entry replaces the generated one |
+| `affinity` | *appended; scheduling term lists are concatenated* — nothing can be subtracted |
+
+So the zone rule is adjustable and the node rule is not. To relax the spread,
+write the operator's field out in full:
 
 ```yaml
-initContainers:
-  - name: your-image-name
-    image: your-image
-    imagePullPolicy: Always
-    ports:
-      - name: portname
-        containerPort: 1234
+cluster:
+  clickhouse:
+    podTemplate:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
 ```
 
-Learn more about [sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/) and [init containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/).
+Omit `labelSelector` on an entry targeting `topologyZoneKey`: the operator fills
+in the pod labels, including the shard id, and a constraint with an empty
+selector matches nothing.
 
-### Using custom scripts
+`nodeHostnameKey` has no equivalent — its rule is a PodAntiAffinity, so clear
+the key itself or live with it. Single-node clusters need both keys cleared, as
+in "Dev / local cluster" above.
 
-For advanced operations, the Bitnami ClickHouse chart allows using custom init and start scripts that will be mounted in `/docker-entrypoint.initdb.d` and `/docker-entrypoint.startdb.d` . The `init` scripts will be run on the first boot whereas the `start` scripts will be run on every container start. For adding the scripts directly as values use the `initdbScripts` and `startdbScripts` values. For using Secrets use the `initdbScriptsSecret` and `startdbScriptsSecret`.
+The chart deliberately offers **no shorthand** for loosening the spread. Doing
+so is a step away from the posture the operator's docs recommend, so it is
+spelled out as the operator's own field rather than hidden behind a
+chart-invented value.
+
+Spread across nodes rather than AZs — one value, useful on a cluster with no
+zone labels:
 
 ```yaml
-initdbScriptsSecret: init-scripts-secret
-startdbScriptsSecret: start-scripts-secret
+cluster:
+  clickhouse:
+    podTemplate:
+      topologyZoneKey: kubernetes.io/hostname
 ```
 
-### Pod affinity
+Drop exclusive node occupancy, keeping the zone spread (replicas may then share
+a node):
 
-This chart allows you to set your custom affinity using the `affinity` parameter. Find more information about Pod affinity in the [kubernetes documentation](https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity).
-
-As an alternative, use one of the preset configurations for pod affinity, pod anti-affinity, and node affinity available at the [bitnami/common](https://github.com/bitnami/charts/tree/main/bitnami/common#affinities) chart. To do so, set the `podAffinityPreset`, `podAntiAffinityPreset`, or `nodeAffinityPreset` parameters.
-
-### Backup and restore
-
-To back up and restore Helm chart deployments on Kubernetes, you need to back up the persistent volumes from the source deployment and attach them to a new deployment using [Velero](https://velero.io/), a Kubernetes backup/restore tool. Find the instructions for using Velero in [this guide](https://techdocs.broadcom.com/us/en/vmware-tanzu/application-catalog/tanzu-application-catalog/services/tac-doc/apps-tutorials-backup-restore-deployments-velero-index.html).
-
-## Persistence
-
-The [Bitnami ClickHouse](https://github.com/bitnami/containers/tree/main/bitnami/clickhouse) image stores the ClickHouse data and configurations at the `/bitnami/clickhouse` path of the container. Persistent Volume Claims are used to keep the data across deployments. This is known to work in GCE, AWS, and minikube.
-
-## Parameters
-
-### Global parameters
-
-| Name                                                  | Description                                                                                                                                                                                                                                                                                                                                                         | Value   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `global.imageRegistry`                                | Global Docker image registry                                                                                                                                                                                                                                                                                                                                        | `""`    |
-| `global.imagePullSecrets`                             | Global Docker registry secret names as an array                                                                                                                                                                                                                                                                                                                     | `[]`    |
-| `global.defaultStorageClass`                          | Global default StorageClass for Persistent Volume(s)                                                                                                                                                                                                                                                                                                                | `""`    |
-| `global.security.allowInsecureImages`                 | Allows skipping image verification                                                                                                                                                                                                                                                                                                                                  | `false` |
-| `global.compatibility.openshift.adaptSecurityContext` | Adapt the securityContext sections of the deployment to make them compatible with Openshift restricted-v2 SCC: remove runAsUser, runAsGroup and fsGroup and let the platform use their allowed default IDs. Possible values: auto (apply if the detected running cluster is Openshift), force (perform the adaptation always), disabled (do not perform adaptation) | `auto`  |
-
-### Common parameters
-
-| Name                     | Description                                                                             | Value           |
-| ------------------------ | --------------------------------------------------------------------------------------- | --------------- |
-| `kubeVersion`            | Override Kubernetes version                                                             | `""`            |
-| `apiVersions`            | Override Kubernetes API versions reported by .Capabilities                              | `[]`            |
-| `nameOverride`           | String to partially override common.names.name                                          | `""`            |
-| `fullnameOverride`       | String to fully override common.names.fullname                                          | `""`            |
-| `namespaceOverride`      | String to fully override common.names.namespace                                         | `""`            |
-| `commonLabels`           | Labels to add to all deployed objects                                                   | `{}`            |
-| `commonAnnotations`      | Annotations to add to all deployed objects                                              | `{}`            |
-| `clusterDomain`          | Kubernetes cluster domain name                                                          | `cluster.local` |
-| `extraDeploy`            | Array of extra objects to deploy with the release                                       | `[]`            |
-| `usePasswordFiles`       | Mount credentials as files instead of using environment variables                       | `true`          |
-| `diagnosticMode.enabled` | Enable diagnostic mode (all probes will be disabled and the command will be overridden) | `false`         |
-| `diagnosticMode.command` | Command to override all containers in the deployment                                    | `["sleep"]`     |
-| `diagnosticMode.args`    | Args to override all containers in the deployment                                       | `["infinity"]`  |
-
-### Default Init Container Parameters
-
-| Name                                                                                        | Description                                                                                                                                                                                                                                                                                                                            | Value                      |
-| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `defaultInitContainers.volumePermissions.enabled`                                           | Enable init container that changes the owner and group of the persistent volume                                                                                                                                                                                                                                                        | `false`                    |
-| `defaultInitContainers.volumePermissions.image.registry`                                    | "volume-permissions" init-containers' image registry                                                                                                                                                                                                                                                                                   | `REGISTRY_NAME`            |
-| `defaultInitContainers.volumePermissions.image.repository`                                  | "volume-permissions" init-containers' image repository                                                                                                                                                                                                                                                                                 | `REPOSITORY_NAME/os-shell` |
-| `defaultInitContainers.volumePermissions.image.digest`                                      | "volume-permissions" init-containers' image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag                                                                                                                                                                                                  | `""`                       |
-| `defaultInitContainers.volumePermissions.image.pullPolicy`                                  | "volume-permissions" init-containers' image pull policy                                                                                                                                                                                                                                                                                | `IfNotPresent`             |
-| `defaultInitContainers.volumePermissions.image.pullSecrets`                                 | "volume-permissions" init-containers' image pull secrets                                                                                                                                                                                                                                                                               | `[]`                       |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.enabled`                  | Enabled "volume-permissions" init-containers' Security Context                                                                                                                                                                                                                                                                         | `true`                     |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.seLinuxOptions`           | Set SELinux options in "volume-permissions" init-containers                                                                                                                                                                                                                                                                            | `{}`                       |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.runAsUser`                | Set runAsUser in "volume-permissions" init-containers' Security Context                                                                                                                                                                                                                                                                | `0`                        |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.privileged`               | Set privileged in "volume-permissions" init-containers' Security Context                                                                                                                                                                                                                                                               | `false`                    |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.allowPrivilegeEscalation` | Set allowPrivilegeEscalation in "volume-permissions" init-containers' Security Context                                                                                                                                                                                                                                                 | `false`                    |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.capabilities.add`         | List of capabilities to be added in "volume-permissions" init-containers                                                                                                                                                                                                                                                               | `["CHOWN"]`                |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.capabilities.drop`        | List of capabilities to be dropped in "volume-permissions" init-containers                                                                                                                                                                                                                                                             | `["ALL"]`                  |
-| `defaultInitContainers.volumePermissions.containerSecurityContext.seccompProfile.type`      | Set seccomp profile in "volume-permissions" init-containers                                                                                                                                                                                                                                                                            | `RuntimeDefault`           |
-| `defaultInitContainers.volumePermissions.resourcesPreset`                                   | Set ClickHouse Keeper "volume-permissions" init container resources according to one common preset (allowed values: none, nano, small, medium, large, xlarge, 2xlarge). This is ignored if defaultInitContainers.volumePermissions.resources is set (defaultInitContainers.volumePermissions.resources is recommended for production). | `nano`                     |
-| `defaultInitContainers.volumePermissions.resources`                                         | Set ClickHouse Keeper "volume-permissions" init container requests and limits for different resources like CPU or memory (essential for production workloads)                                                                                                                                                                          | `{}`                       |
-
-### ClickHouse parameters
-
-| Name                                                | Description                                                                                                                                                                                                       | Value                        |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `image.registry`                                    | ClickHouse image registry                                                                                                                                                                                         | `REGISTRY_NAME`              |
-| `image.repository`                                  | ClickHouse image repository                                                                                                                                                                                       | `REPOSITORY_NAME/clickhouse` |
-| `image.digest`                                      | ClickHouse image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag                                                                                                        | `""`                         |
-| `image.pullPolicy`                                  | ClickHouse image pull policy                                                                                                                                                                                      | `IfNotPresent`               |
-| `image.pullSecrets`                                 | ClickHouse image pull secrets                                                                                                                                                                                     | `[]`                         |
-| `image.debug`                                       | Enable ClickHouse image debug mode                                                                                                                                                                                | `false`                      |
-| `clusterName`                                       | ClickHouse cluster name                                                                                                                                                                                           | `default`                    |
-| `auth.username`                                     | ClickHouse Admin username                                                                                                                                                                                         | `default`                    |
-| `auth.password`                                     | ClickHouse Admin password                                                                                                                                                                                         | `""`                         |
-| `auth.existingSecret`                               | Name of a secret containing the Admin password                                                                                                                                                                    | `""`                         |
-| `auth.existingSecretKey`                            | Name of the key inside the existing secret                                                                                                                                                                        | `""`                         |
-| `tls.enabled`                                       | Enable TLS configuration for ClickHouse                                                                                                                                                                           | `false`                      |
-| `tls.autoGenerated.enabled`                         | Enable automatic generation of TLS certificates                                                                                                                                                                   | `true`                       |
-| `tls.autoGenerated.engine`                          | Mechanism to generate the certificates (allowed values: helm, cert-manager)                                                                                                                                       | `helm`                       |
-| `tls.autoGenerated.certManager.existingIssuer`      | The name of an existing Issuer to use for generating the certificates (only for `cert-manager` engine)                                                                                                            | `""`                         |
-| `tls.autoGenerated.certManager.existingIssuerKind`  | Existing Issuer kind, defaults to Issuer (only for `cert-manager` engine)                                                                                                                                         | `""`                         |
-| `tls.autoGenerated.certManager.keyAlgorithm`        | Key algorithm for the certificates (only for `cert-manager` engine)                                                                                                                                               | `RSA`                        |
-| `tls.autoGenerated.certManager.keySize`             | Key size for the certificates (only for `cert-manager` engine)                                                                                                                                                    | `2048`                       |
-| `tls.autoGenerated.certManager.duration`            | Duration for the certificates (only for `cert-manager` engine)                                                                                                                                                    | `2160h`                      |
-| `tls.autoGenerated.certManager.renewBefore`         | Renewal period for the certificates (only for `cert-manager` engine)                                                                                                                                              | `360h`                       |
-| `tls.ca`                                            | CA certificate for TLS. Ignored if `tls.existingCASecret` is set                                                                                                                                                  | `""`                         |
-| `tls.existingCASecret`                              | The name of an existing Secret containing the CA certificate for TLS                                                                                                                                              | `""`                         |
-| `tls.server.cert`                                   | TLS certificate for ClickHouse servers. Ignored if `tls.server.existingSecret` is set                                                                                                                             | `""`                         |
-| `tls.server.key`                                    | TLS key for ClickHouse servers. Ignored if `tls.server.existingSecret` is set                                                                                                                                     | `""`                         |
-| `tls.server.existingSecret`                         | The name of an existing Secret containing the TLS certificates for ClickHouse servers                                                                                                                             | `""`                         |
-| `tls.keeper.cert`                                   | TLS certificate for ClickHouse Keeper. Ignored if `tls.keeper.existingSecret` is set                                                                                                                              | `""`                         |
-| `tls.keeper.key`                                    | TLS key for ClickHouse Keeper. Ignored if `tls.keeper.existingSecret` is set                                                                                                                                      | `""`                         |
-| `tls.keeper.existingSecret`                         | The name of an existing Secret containing the TLS certificates for ClickHouse Keeper                                                                                                                              | `""`                         |
-| `logLevel`                                          | Logging level                                                                                                                                                                                                     | `information`                |
-| `sampling.enabled`                                  | Enable logging tables collected by sampling query profiler                                                                                                                                                        | `false`                      |
-| `configuration`                                     | Specify content for ClickHouse configuration (basic one auto-generated based on other values otherwise)                                                                                                           | `{}`                         |
-| `existingConfigmap`                                 | The name of an existing ConfigMap with your custom configuration for ClickHouse                                                                                                                                   | `""`                         |
-| `configdFiles`                                      | Extra configuration files to be mounted at config.d                                                                                                                                                               | `{}`                         |
-| `existingConfigdConfigmap`                          | The name of an existing ConfigMap with extra configuration files for ClickHouse                                                                                                                                   | `""`                         |
-| `usersdFiles`                                       | Extra users configuration files to be mounted at users.d                                                                                                                                                          | `{}`                         |
-| `existingUsersdConfigmap`                           | The name of an existing ConfigMap with extra users configuration files for ClickHouse                                                                                                                             | `""`                         |
-| `existingUsersdSecret`                              | The name of an existing Secret with extra users configuration files for ClickHouse                                                                                                                                | `""`                         |
-| `initdbScripts`                                     | Dictionary of initdb scripts                                                                                                                                                                                      | `{}`                         |
-| `initdbScriptsSecret`                               | ConfigMap with the initdb scripts (Note: Overrides `initdbScripts`)                                                                                                                                               | `""`                         |
-| `startdbScripts`                                    | Dictionary of startdb scripts                                                                                                                                                                                     | `{}`                         |
-| `startdbScriptsSecret`                              | ConfigMap with the startdb scripts (Note: Overrides `startdbScripts`)                                                                                                                                             | `""`                         |
-| `shards`                                            | Number of ClickHouse shards to deploy                                                                                                                                                                             | `2`                          |
-| `replicaCount`                                      | Number of ClickHouse replicas per shard to deploy                                                                                                                                                                 | `3`                          |
-| `distributeReplicasByZone`                          | Schedules replicas of the same shard to different availability zones                                                                                                                                              | `false`                      |
-| `exposeMysql`                                       | Expose MySQL port container port                                                                                                                                                                                  | `true`                       |
-| `exposePostgresql`                                  | Expose PostgreSQL port container port                                                                                                                                                                             | `true`                       |
-| `containerPorts.http`                               | ClickHouse HTTP container port                                                                                                                                                                                    | `8123`                       |
-| `containerPorts.https`                              | ClickHouse HTTPS container port                                                                                                                                                                                   | `8443`                       |
-| `containerPorts.tcp`                                | ClickHouse TCP container port                                                                                                                                                                                     | `9000`                       |
-| `containerPorts.tcpSecure`                          | ClickHouse TCP (secure) container port                                                                                                                                                                            | `9440`                       |
-| `containerPorts.mysql`                              | ClickHouse MySQL container port                                                                                                                                                                                   | `9004`                       |
-| `containerPorts.postgresql`                         | ClickHouse PostgreSQL container port                                                                                                                                                                              | `9005`                       |
-| `containerPorts.interserver`                        | ClickHouse Interserver container port                                                                                                                                                                             | `9009`                       |
-| `containerPorts.metrics`                            | ClickHouse metrics container port                                                                                                                                                                                 | `8001`                       |
-| `livenessProbe.enabled`                             | Enable livenessProbe on ClickHouse containers                                                                                                                                                                     | `true`                       |
-| `livenessProbe.initialDelaySeconds`                 | Initial delay seconds for livenessProbe                                                                                                                                                                           | `10`                         |
-| `livenessProbe.periodSeconds`                       | Period seconds for livenessProbe                                                                                                                                                                                  | `10`                         |
-| `livenessProbe.timeoutSeconds`                      | Timeout seconds for livenessProbe                                                                                                                                                                                 | `1`                          |
-| `livenessProbe.failureThreshold`                    | Failure threshold for livenessProbe                                                                                                                                                                               | `3`                          |
-| `livenessProbe.successThreshold`                    | Success threshold for livenessProbe                                                                                                                                                                               | `1`                          |
-| `readinessProbe.enabled`                            | Enable readinessProbe on ClickHouse containers                                                                                                                                                                    | `true`                       |
-| `readinessProbe.initialDelaySeconds`                | Initial delay seconds for readinessProbe                                                                                                                                                                          | `10`                         |
-| `readinessProbe.periodSeconds`                      | Period seconds for readinessProbe                                                                                                                                                                                 | `10`                         |
-| `readinessProbe.timeoutSeconds`                     | Timeout seconds for readinessProbe                                                                                                                                                                                | `1`                          |
-| `readinessProbe.failureThreshold`                   | Failure threshold for readinessProbe                                                                                                                                                                              | `3`                          |
-| `readinessProbe.successThreshold`                   | Success threshold for readinessProbe                                                                                                                                                                              | `1`                          |
-| `startupProbe.enabled`                              | Enable startupProbe on ClickHouse containers                                                                                                                                                                      | `false`                      |
-| `startupProbe.initialDelaySeconds`                  | Initial delay seconds for startupProbe                                                                                                                                                                            | `10`                         |
-| `startupProbe.periodSeconds`                        | Period seconds for startupProbe                                                                                                                                                                                   | `10`                         |
-| `startupProbe.timeoutSeconds`                       | Timeout seconds for startupProbe                                                                                                                                                                                  | `1`                          |
-| `startupProbe.failureThreshold`                     | Failure threshold for startupProbe                                                                                                                                                                                | `3`                          |
-| `startupProbe.successThreshold`                     | Success threshold for startupProbe                                                                                                                                                                                | `1`                          |
-| `customLivenessProbe`                               | Custom livenessProbe that overrides the default one                                                                                                                                                               | `{}`                         |
-| `customReadinessProbe`                              | Custom readinessProbe that overrides the default one                                                                                                                                                              | `{}`                         |
-| `customStartupProbe`                                | Custom startupProbe that overrides the default one                                                                                                                                                                | `{}`                         |
-| `resourcesPreset`                                   | Set container resources according to one common preset (allowed values: none, nano, micro, small, medium, large, xlarge, 2xlarge). This is ignored if resources is set (resources is recommended for production). | `small`                      |
-| `resources`                                         | Set container requests and limits for different resources like CPU or memory (essential for production workloads)                                                                                                 | `{}`                         |
-| `podSecurityContext.enabled`                        | Enabled ClickHouse pods' Security Context                                                                                                                                                                         | `true`                       |
-| `podSecurityContext.fsGroupChangePolicy`            | Set filesystem group change policy                                                                                                                                                                                | `Always`                     |
-| `podSecurityContext.sysctls`                        | Set kernel settings using the sysctl interface                                                                                                                                                                    | `[]`                         |
-| `podSecurityContext.supplementalGroups`             | Set filesystem extra groups                                                                                                                                                                                       | `[]`                         |
-| `podSecurityContext.fsGroup`                        | Set ClickHouse pod's Security Context fsGroup                                                                                                                                                                     | `1001`                       |
-| `containerSecurityContext.enabled`                  | Enable containers' Security Context                                                                                                                                                                               | `true`                       |
-| `containerSecurityContext.seLinuxOptions`           | Set SELinux options in container                                                                                                                                                                                  | `{}`                         |
-| `containerSecurityContext.runAsUser`                | Set containers' Security Context runAsUser                                                                                                                                                                        | `1001`                       |
-| `containerSecurityContext.runAsGroup`               | Set containers' Security Context runAsGroup                                                                                                                                                                       | `1001`                       |
-| `containerSecurityContext.runAsNonRoot`             | Set containers' Security Context runAsNonRoot                                                                                                                                                                     | `true`                       |
-| `containerSecurityContext.readOnlyRootFilesystem`   | Set read only root file system pod's                                                                                                                                                                              | `true`                       |
-| `containerSecurityContext.privileged`               | Set ClickHouse container's Security Context privileged                                                                                                                                                            | `false`                      |
-| `containerSecurityContext.allowPrivilegeEscalation` | Set ClickHouse container's Security Context allowPrivilegeEscalation                                                                                                                                              | `false`                      |
-| `containerSecurityContext.capabilities.drop`        | List of capabilities to be dropped                                                                                                                                                                                | `["ALL"]`                    |
-| `containerSecurityContext.seccompProfile.type`      | Set container's Security Context seccomp profile                                                                                                                                                                  | `RuntimeDefault`             |
-| `command`                                           | Override default container command (useful when using custom images)                                                                                                                                              | `[]`                         |
-| `args`                                              | Override default container args (useful when using custom images)                                                                                                                                                 | `[]`                         |
-| `automountServiceAccountToken`                      | Mount Service Account token in pod                                                                                                                                                                                | `false`                      |
-| `hostAliases`                                       | ClickHouse pods host aliases                                                                                                                                                                                      | `[]`                         |
-| `podLabels`                                         | Extra labels for ClickHouse pods                                                                                                                                                                                  | `{}`                         |
-| `podAnnotations`                                    | Annotations for ClickHouse pods                                                                                                                                                                                   | `{}`                         |
-| `podAffinityPreset`                                 | Pod affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`                                                                                                                               | `""`                         |
-| `podAntiAffinityPreset`                             | Pod anti-affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`                                                                                                                          | `soft`                       |
-| `nodeAffinityPreset.type`                           | Node affinity preset type. Ignored if `affinity` is set. Allowed values: `soft` or `hard`                                                                                                                         | `""`                         |
-| `nodeAffinityPreset.key`                            | Node label key to match. Ignored if `affinity` is set                                                                                                                                                             | `""`                         |
-| `nodeAffinityPreset.values`                         | Node label values to match. Ignored if `affinity` is set                                                                                                                                                          | `[]`                         |
-| `affinity`                                          | Affinity for ClickHouse pods assignment                                                                                                                                                                           | `{}`                         |
-| `nodeSelector`                                      | Node labels for ClickHouse pods assignment                                                                                                                                                                        | `{}`                         |
-| `tolerations`                                       | Tolerations for ClickHouse pods assignment                                                                                                                                                                        | `[]`                         |
-| `updateStrategy.type`                               | ClickHouse StatefulSet strategy type                                                                                                                                                                              | `RollingUpdate`              |
-| `updateStrategy.rollingUpdate`                      | ClickHouse StatefulSet rolling update configuration parameters                                                                                                                                                    | `{}`                         |
-| `podManagementPolicy`                               | Statefulset Pod management policy, it needs to be Parallel to be able to complete the cluster join                                                                                                                | `Parallel`                   |
-| `priorityClassName`                                 | ClickHouse pods' priorityClassName                                                                                                                                                                                | `""`                         |
-| `topologySpreadConstraints`                         | Topology Spread Constraints for pod assignment spread across your cluster among failure-domains. Evaluated as a template                                                                                          | `[]`                         |
-| `schedulerName`                                     | Name of the k8s scheduler (other than default) for ClickHouse pods                                                                                                                                                | `""`                         |
-| `terminationGracePeriodSeconds`                     | Seconds Redmine pod needs to terminate gracefully                                                                                                                                                                 | `""`                         |
-| `lifecycleHooks`                                    | for the ClickHouse container(s) to automate configuration before or after startup                                                                                                                                 | `{}`                         |
-| `extraEnvVars`                                      | Array with extra environment variables to add to ClickHouse nodes                                                                                                                                                 | `[]`                         |
-| `extraEnvVarsCM`                                    | Name of existing ConfigMap containing extra env vars for ClickHouse nodes                                                                                                                                         | `""`                         |
-| `extraEnvVarsSecret`                                | Name of existing Secret containing extra env vars for ClickHouse nodes                                                                                                                                            | `""`                         |
-| `extraVolumes`                                      | Optionally specify extra list of additional volumes for the ClickHouse pod(s)                                                                                                                                     | `[]`                         |
-| `extraVolumeMounts`                                 | Optionally specify extra list of additional volumeMounts for the ClickHouse container(s)                                                                                                                          | `[]`                         |
-| `extraVolumeClaimTemplates`                         | Optionally specify extra list of additional volumeClaimTemplates for the ClickHouse container(s)                                                                                                                  | `[]`                         |
-| `sidecars`                                          | Add additional sidecar containers to the ClickHouse pod(s)                                                                                                                                                        | `[]`                         |
-| `initContainers`                                    | Add additional init containers to the ClickHouse pod(s)                                                                                                                                                           | `[]`                         |
-| `pdb.create`                                        | Enable/disable a Pod Disruption Budget creation                                                                                                                                                                   | `true`                       |
-| `pdb.minAvailable`                                  | Minimum number/percentage of pods that should remain scheduled                                                                                                                                                    | `""`                         |
-| `pdb.maxUnavailable`                                | Maximum number/percentage of pods that may be made unavailable. Defaults to `1` if both `pdb.minAvailable` and `pdb.maxUnavailable` are empty.                                                                    | `""`                         |
-| `autoscaling.vpa.enabled`                           | Enable VPA                                                                                                                                                                                                        | `false`                      |
-| `autoscaling.vpa.annotations`                       | Annotations for VPA resource                                                                                                                                                                                      | `{}`                         |
-| `autoscaling.vpa.controlledResources`               | VPA List of resources that the vertical pod autoscaler can control. Defaults to cpu and memory                                                                                                                    | `[]`                         |
-| `autoscaling.vpa.maxAllowed`                        | VPA Max allowed resources for the pod                                                                                                                                                                             | `{}`                         |
-| `autoscaling.vpa.minAllowed`                        | VPA Min allowed resources for the pod                                                                                                                                                                             | `{}`                         |
-| `autoscaling.vpa.updatePolicy.updateMode`           | Autoscaling update policy Specifies whether recommended updates are applied when a Pod is started and whether recommended updates are applied during the life of a Pod                                            | `Auto`                       |
-
-### ClickHouse Traffic Exposure parameters
-
-| Name                                    | Description                                                                                                                                                 | Value                    |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `service.type`                          | ClickHouse service type                                                                                                                                     | `ClusterIP`              |
-| `service.perReplicaAccess`              | Enable per-replica service creation                                                                                                                         | `false`                  |
-| `service.ports.http`                    | ClickHouse service HTTP port                                                                                                                                | `8123`                   |
-| `service.ports.https`                   | ClickHouse service HTTPS port                                                                                                                               | `443`                    |
-| `service.ports.tcp`                     | ClickHouse service TCP port                                                                                                                                 | `9000`                   |
-| `service.ports.tcpSecure`               | ClickHouse service TCP (secure) port                                                                                                                        | `9440`                   |
-| `service.ports.mysql`                   | ClickHouse service MySQL port                                                                                                                               | `9004`                   |
-| `service.ports.postgresql`              | ClickHouse service PostgreSQL port                                                                                                                          | `9005`                   |
-| `service.ports.interserver`             | ClickHouse service Interserver port                                                                                                                         | `9009`                   |
-| `service.ports.metrics`                 | ClickHouse service metrics port                                                                                                                             | `8001`                   |
-| `service.nodePorts.http`                | Node port for HTTP                                                                                                                                          | `""`                     |
-| `service.nodePorts.https`               | Node port for HTTPS                                                                                                                                         | `""`                     |
-| `service.nodePorts.tcp`                 | Node port for TCP                                                                                                                                           | `""`                     |
-| `service.nodePorts.tcpSecure`           | Node port for TCP (with TLS)                                                                                                                                | `""`                     |
-| `service.nodePorts.mysql`               | Node port for MySQL                                                                                                                                         | `""`                     |
-| `service.nodePorts.postgresql`          | Node port for PostgreSQL                                                                                                                                    | `""`                     |
-| `service.nodePorts.interserver`         | Node port for Interserver                                                                                                                                   | `""`                     |
-| `service.nodePorts.metrics`             | Node port for metrics                                                                                                                                       | `""`                     |
-| `service.clusterIP`                     | ClickHouse service Cluster IP                                                                                                                               | `""`                     |
-| `service.loadBalancerIP`                | ClickHouse service Load Balancer IP (only if per-replica access is disabled)                                                                                | `""`                     |
-| `service.loadBalancerIPs`               | Array of ClickHouse service Load Balancer IPs (only if per-replica access is enabled). Length must be the same as shards multiplied by replicaCount         | `[]`                     |
-| `service.loadBalancerAnnotations`       | Array of ClickHouse service Load Balancer annotations (only if per-replica access is enabled). Length must be the same as shards multiplied by replicaCount | `[]`                     |
-| `service.loadBalancerSourceRanges`      | ClickHouse service Load Balancer sources                                                                                                                    | `[]`                     |
-| `service.externalTrafficPolicy`         | ClickHouse service external traffic policy                                                                                                                  | `Cluster`                |
-| `service.annotations`                   | Additional custom annotations for ClickHouse service                                                                                                        | `{}`                     |
-| `service.extraPorts`                    | Extra ports to expose in ClickHouse service (normally used with the `sidecars` value)                                                                       | `[]`                     |
-| `service.sessionAffinity`               | Control where client requests go, to the same pod or round-robin                                                                                            | `None`                   |
-| `service.sessionAffinityConfig`         | Additional settings for the sessionAffinity                                                                                                                 | `{}`                     |
-| `service.headless.annotations`          | Annotations for the headless service.                                                                                                                       | `{}`                     |
-| `service.headless.extraPorts`           | Optionally specify extra ports to expose for the headless service.                                                                                          | `[]`                     |
-| `ingress.enabled`                       | Enable ingress record generation for ClickHouse                                                                                                             | `false`                  |
-| `ingress.pathType`                      | Ingress path type                                                                                                                                           | `ImplementationSpecific` |
-| `ingress.apiVersion`                    | Force Ingress API version (automatically detected if not set)                                                                                               | `""`                     |
-| `ingress.hostname`                      | Default host for the ingress record                                                                                                                         | `clickhouse.local`       |
-| `ingress.ingressClassName`              | IngressClass that will be be used to implement the Ingress (Kubernetes 1.18+)                                                                               | `""`                     |
-| `ingress.path`                          | Default path for the ingress record                                                                                                                         | `/`                      |
-| `ingress.annotations`                   | Additional annotations for the Ingress resource. To enable certificate autogeneration, place here your cert-manager annotations.                            | `{}`                     |
-| `ingress.tls`                           | Enable TLS configuration for the host defined at `ingress.hostname` parameter                                                                               | `false`                  |
-| `ingress.selfSigned`                    | Create a TLS secret for this ingress record using self-signed certificates generated by Helm                                                                | `false`                  |
-| `ingress.extraHosts`                    | An array with additional hostname(s) to be covered with the ingress record                                                                                  | `[]`                     |
-| `ingress.extraPaths`                    | An array with additional arbitrary paths that may need to be added to the ingress under the main host                                                       | `[]`                     |
-| `ingress.extraTls`                      | TLS configuration for additional hostname(s) to be covered with this ingress record                                                                         | `[]`                     |
-| `ingress.secrets`                       | Custom TLS certificates as secrets                                                                                                                          | `[]`                     |
-| `ingress.extraRules`                    | Additional rules to be covered with this ingress record                                                                                                     | `[]`                     |
-| `networkPolicy.enabled`                 | Specifies whether a NetworkPolicy should be created                                                                                                         | `true`                   |
-| `networkPolicy.allowExternal`           | Don't require client label for connections                                                                                                                  | `true`                   |
-| `networkPolicy.allowExternalEgress`     | Allow the pod to access any range of port and all destinations.                                                                                             | `true`                   |
-| `networkPolicy.addExternalClientAccess` | Allow access from pods with client label set to "true". Ignored if `networkPolicy.allowExternal` is true.                                                   | `true`                   |
-| `networkPolicy.extraIngress`            | Add extra ingress rules to the NetworkPolicy                                                                                                                | `[]`                     |
-| `networkPolicy.extraEgress`             | Add extra ingress rules to the NetworkPolicy                                                                                                                | `[]`                     |
-| `networkPolicy.ingressNSMatchLabels`    | Labels to match to allow traffic from other namespaces                                                                                                      | `{}`                     |
-| `networkPolicy.ingressNSPodMatchLabels` | Pod labels to match to allow traffic from other namespaces                                                                                                  | `{}`                     |
-
-### ClickHouse Persistence parameters
-
-| Name                                               | Description                                                                    | Value                 |
-| -------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- |
-| `persistentVolumeClaimRetentionPolicy.enabled`     | Controls if and how PVCs are deleted during the lifecycle of a StatefulSet     | `false`               |
-| `persistentVolumeClaimRetentionPolicy.whenScaled`  | Volume retention behavior when the replica count of the StatefulSet is reduced | `Retain`              |
-| `persistentVolumeClaimRetentionPolicy.whenDeleted` | Volume retention behavior that applies when the StatefulSet is deleted         | `Retain`              |
-| `persistence.enabled`                              | Enable persistence using Persistent Volume Claims                              | `true`                |
-| `persistence.volumeName`                           | Name to assign the volume                                                      | `data`                |
-| `persistence.existingClaim`                        | Name of an existing PVC to use                                                 | `""`                  |
-| `persistence.storageClass`                         | Storage class of backing PVC                                                   | `""`                  |
-| `persistence.labels`                               | Persistent Volume Claim labels                                                 | `{}`                  |
-| `persistence.annotations`                          | Persistent Volume Claim annotations                                            | `{}`                  |
-| `persistence.accessModes`                          | Persistent Volume Access Modes                                                 | `["ReadWriteOnce"]`   |
-| `persistence.size`                                 | Size of data volume                                                            | `8Gi`                 |
-| `persistence.selector`                             | Selector to match an existing Persistent Volume for ClickHouse data PVC        | `{}`                  |
-| `persistence.dataSource`                           | Custom PVC data source                                                         | `{}`                  |
-| `persistence.mountPath`                            | Mount path of the ClickHouse data volume                                       | `/bitnami/clickhouse` |
-
-### ClickHouse Keeper parameters
-
-| Name                                                       | Description                                                                                                                                                                                                                     | Value                               |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `keeper.enabled`                                           | Deploy ClickHouse Keeper to provide coordination capabilities                                                                                                                                                                   | `true`                              |
-| `keeper.image.registry`                                    | ClickHouse Keeper image registry                                                                                                                                                                                                | `REGISTRY_NAME`                     |
-| `keeper.image.repository`                                  | ClickHouse Keeper image repository                                                                                                                                                                                              | `REPOSITORY_NAME/clickhouse-keeper` |
-| `keeper.image.digest`                                      | ClickHouse Keeper image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag image tag (immutable tags are recommended)                                                                    | `""`                                |
-| `keeper.image.pullPolicy`                                  | ClickHouse Keeper image pull policy                                                                                                                                                                                             | `IfNotPresent`                      |
-| `keeper.image.pullSecrets`                                 | ClickHouse Keeper image pull secrets                                                                                                                                                                                            | `[]`                                |
-| `keeper.image.debug`                                       | Enable ClickHouse image debug mode                                                                                                                                                                                              | `false`                             |
-| `keeper.replicaCount`                                      | Number of ClickHouse Keeper replicas to deploy                                                                                                                                                                                  | `3`                                 |
-| `keeper.configuration`                                     | Specify content for ClickHouse Keeper configuration (basic one auto-generated based on other values otherwise)                                                                                                                  | `{}`                                |
-| `keeper.existingConfigmap`                                 | The name of an existing ConfigMap with your custom configuration for ClickHouse Keeper                                                                                                                                          | `""`                                |
-| `keeper.configdFiles`                                      | Extra configuration files to be mounted at keeper_config.d                                                                                                                                                                      | `{}`                                |
-| `keeper.existingConfigdConfigmap`                          | The name of an existing ConfigMap with extra configuration files for ClickHouse Keeper                                                                                                                                          | `""`                                |
-| `keeper.usersdFiles`                                       | Extra users configuration files to be mounted at users.d                                                                                                                                                                        | `{}`                                |
-| `keeper.existingUsersdConfigmap`                           | The name of an existing ConfigMap with extra users configuration files for ClickHouse Keeper                                                                                                                                    | `""`                                |
-| `keeper.existingUsersdSecret`                              | The name of an existing Secret with extra users configuration files for ClickHouse Keeper                                                                                                                                       | `""`                                |
-| `keeper.containerPorts.tcp`                                | ClickHouse Keeper TCP container port                                                                                                                                                                                            | `9181`                              |
-| `keeper.containerPorts.tcpSecure`                          | ClickHouse TCP (secure) container port                                                                                                                                                                                          | `9281`                              |
-| `keeper.containerPorts.raft`                               | ClickHouse Keeper Raft container port                                                                                                                                                                                           | `9234`                              |
-| `keeper.extraContainerPorts`                               | ClickHouse Keeper extra containerPorts                                                                                                                                                                                          | `[]`                                |
-| `keeper.livenessProbe.enabled`                             | Enable livenessProbe on ClickHouse Keeper containers                                                                                                                                                                            | `true`                              |
-| `keeper.livenessProbe.initialDelaySeconds`                 | Initial delay seconds for livenessProbe                                                                                                                                                                                         | `10`                                |
-| `keeper.livenessProbe.periodSeconds`                       | Period seconds for livenessProbe                                                                                                                                                                                                | `10`                                |
-| `keeper.livenessProbe.timeoutSeconds`                      | Timeout seconds for livenessProbe                                                                                                                                                                                               | `1`                                 |
-| `keeper.livenessProbe.failureThreshold`                    | Failure threshold for livenessProbe                                                                                                                                                                                             | `3`                                 |
-| `keeper.livenessProbe.successThreshold`                    | Success threshold for livenessProbe                                                                                                                                                                                             | `1`                                 |
-| `keeper.readinessProbe.enabled`                            | Enable readinessProbe on ClickHouse Keeper containers                                                                                                                                                                           | `true`                              |
-| `keeper.readinessProbe.initialDelaySeconds`                | Initial delay seconds for readinessProbe                                                                                                                                                                                        | `10`                                |
-| `keeper.readinessProbe.periodSeconds`                      | Period seconds for readinessProbe                                                                                                                                                                                               | `10`                                |
-| `keeper.readinessProbe.timeoutSeconds`                     | Timeout seconds for readinessProbe                                                                                                                                                                                              | `1`                                 |
-| `keeper.readinessProbe.failureThreshold`                   | Failure threshold for readinessProbe                                                                                                                                                                                            | `3`                                 |
-| `keeper.readinessProbe.successThreshold`                   | Success threshold for readinessProbe                                                                                                                                                                                            | `1`                                 |
-| `keeper.startupProbe.enabled`                              | Enable startupProbe on ClickHouse Keeper containers                                                                                                                                                                             | `false`                             |
-| `keeper.startupProbe.initialDelaySeconds`                  | Initial delay seconds for startupProbe                                                                                                                                                                                          | `10`                                |
-| `keeper.startupProbe.periodSeconds`                        | Period seconds for startupProbe                                                                                                                                                                                                 | `10`                                |
-| `keeper.startupProbe.timeoutSeconds`                       | Timeout seconds for startupProbe                                                                                                                                                                                                | `1`                                 |
-| `keeper.startupProbe.failureThreshold`                     | Failure threshold for startupProbe                                                                                                                                                                                              | `3`                                 |
-| `keeper.startupProbe.successThreshold`                     | Success threshold for startupProbe                                                                                                                                                                                              | `1`                                 |
-| `keeper.customLivenessProbe`                               | Custom livenessProbe that overrides the default one                                                                                                                                                                             | `{}`                                |
-| `keeper.customReadinessProbe`                              | Custom readinessProbe that overrides the default one                                                                                                                                                                            | `{}`                                |
-| `keeper.customStartupProbe`                                | Custom startupProbe that overrides the default one                                                                                                                                                                              | `{}`                                |
-| `keeper.resourcesPreset`                                   | Set container resources according to one common preset (allowed values: none, nano, micro, small, medium, large, xlarge, 2xlarge). This is ignored if keeper.resources is set (keeper.resources is recommended for production). | `small`                             |
-| `keeper.resources`                                         | Set container requests and limits for different resources like CPU or memory (essential for production workloads)                                                                                                               | `{}`                                |
-| `keeper.podSecurityContext.enabled`                        | Enabled ClickHouse Keeper pods' Security Context                                                                                                                                                                                | `true`                              |
-| `keeper.podSecurityContext.fsGroupChangePolicy`            | Set filesystem group change policy                                                                                                                                                                                              | `Always`                            |
-| `keeper.podSecurityContext.sysctls`                        | Set kernel settings using the sysctl interface                                                                                                                                                                                  | `[]`                                |
-| `keeper.podSecurityContext.supplementalGroups`             | Set filesystem extra groups                                                                                                                                                                                                     | `[]`                                |
-| `keeper.podSecurityContext.fsGroup`                        | Set ClickHouse Keeper pod's Security Context fsGroup                                                                                                                                                                            | `1001`                              |
-| `keeper.containerSecurityContext.enabled`                  | Enabled ClickHouse Keeper containers' Security Context                                                                                                                                                                          | `true`                              |
-| `keeper.containerSecurityContext.seLinuxOptions`           | Set SELinux options in container                                                                                                                                                                                                | `{}`                                |
-| `keeper.containerSecurityContext.runAsUser`                | Set ClickHouse Keeper containers' Security Context runAsUser                                                                                                                                                                    | `1001`                              |
-| `keeper.containerSecurityContext.runAsGroup`               | Set ClickHouse Keeper containers' Security Context runAsGroup                                                                                                                                                                   | `1001`                              |
-| `keeper.containerSecurityContext.runAsNonRoot`             | Set ClickHouse Keeper containers' Security Context runAsNonRoot                                                                                                                                                                 | `true`                              |
-| `keeper.containerSecurityContext.privileged`               | Set web container's Security Context privileged                                                                                                                                                                                 | `false`                             |
-| `keeper.containerSecurityContext.allowPrivilegeEscalation` | Set web container's Security Context allowPrivilegeEscalation                                                                                                                                                                   | `false`                             |
-| `keeper.containerSecurityContext.readOnlyRootFilesystem`   | Set web container's Security Context readOnlyRootFilesystem                                                                                                                                                                     | `true`                              |
-| `keeper.containerSecurityContext.capabilities.drop`        | List of capabilities to be dropped                                                                                                                                                                                              | `["ALL"]`                           |
-| `keeper.containerSecurityContext.seccompProfile.type`      | Set container's Security Context seccomp profile                                                                                                                                                                                | `RuntimeDefault`                    |
-| `keeper.command`                                           | Override default container command (useful when using custom images)                                                                                                                                                            | `[]`                                |
-| `keeper.args`                                              | Override default container args (useful when using custom images)                                                                                                                                                               | `[]`                                |
-| `keeper.extraEnvVars`                                      | Array with extra environment variables to add to ClickHouse Keeper container(s)                                                                                                                                                 | `[]`                                |
-| `keeper.extraEnvVarsCM`                                    | Name of existing ConfigMap containing extra env vars for ClickHouse Keeper container(s)                                                                                                                                         | `""`                                |
-| `keeper.extraEnvVarsSecret`                                | Name of existing Secret containing extra env vars for ClickHouse Keeper container(s)                                                                                                                                            | `""`                                |
-| `keeper.automountServiceAccountToken`                      | Mount Service Account token in pod                                                                                                                                                                                              | `false`                             |
-| `keeper.hostAliases`                                       | ClickHouse Keeper pods host aliases                                                                                                                                                                                             | `[]`                                |
-| `keeper.podLabels`                                         | Extra labels for ClickHouse Keeper pods                                                                                                                                                                                         | `{}`                                |
-| `keeper.podAnnotations`                                    | Annotations for ClickHouse Keeper pods                                                                                                                                                                                          | `{}`                                |
-| `keeper.podAffinityPreset`                                 | Pod affinity preset. Ignored if `keeper.affinity` is set. Allowed values: `soft` or `hard`                                                                                                                                      | `""`                                |
-| `keeper.podAntiAffinityPreset`                             | Pod anti-affinity preset. Ignored if `keeper.affinity` is set. Allowed values: `soft` or `hard`                                                                                                                                 | `soft`                              |
-| `keeper.nodeAffinityPreset.key`                            | Node label key to match. Ignored if `keeper.affinity` is set.                                                                                                                                                                   | `""`                                |
-| `keeper.nodeAffinityPreset.type`                           | Node affinity preset type. Ignored if `keeper.affinity` is set. Allowed values: `soft` or `hard`                                                                                                                                | `""`                                |
-| `keeper.nodeAffinityPreset.values`                         | Node label values to match. Ignored if `keeper.affinity` is set.                                                                                                                                                                | `[]`                                |
-| `keeper.affinity`                                          | Affinity for ClickHouse Keeper pods assignment                                                                                                                                                                                  | `{}`                                |
-| `keeper.nodeSelector`                                      | Node labels for ClickHouse Keeper pods assignment                                                                                                                                                                               | `{}`                                |
-| `keeper.tolerations`                                       | Tolerations for ClickHouse Keeper pods assignment                                                                                                                                                                               | `[]`                                |
-| `keeper.updateStrategy.type`                               | ClickHouse Keeper StatefulSet strategy type                                                                                                                                                                                     | `RollingUpdate`                     |
-| `keeper.updateStrategy.rollingUpdate`                      | ClickHouse Keeper StatefulSet rolling update configuration parameters                                                                                                                                                           | `{}`                                |
-| `keeper.podManagementPolicy`                               | StatefulSet Pod management policy, it needs to be Parallel to be able to complete the cluster join                                                                                                                              | `Parallel`                          |
-| `keeper.priorityClassName`                                 | ClickHouse Keeper pods' priorityClassName                                                                                                                                                                                       | `""`                                |
-| `keeper.topologySpreadConstraints`                         | Topology Spread Constraints for pod assignment spread across your cluster among failure-domains. Evaluated as a template                                                                                                        | `[]`                                |
-| `keeper.schedulerName`                                     | Name of the k8s scheduler (other than default) for ClickHouse pods                                                                                                                                                              | `""`                                |
-| `keeper.terminationGracePeriodSeconds`                     | Seconds Redmine pod needs to terminate gracefully                                                                                                                                                                               | `""`                                |
-| `keeper.lifecycleHooks`                                    | for the ClickHouse Keeper container(s) to automate configuration before or after startup                                                                                                                                        | `{}`                                |
-| `keeper.extraVolumes`                                      | Optionally specify extra list of additional volumes for the ClickHouse Keeper pod(s)                                                                                                                                            | `[]`                                |
-| `keeper.extraVolumeMounts`                                 | Optionally specify extra list of additional volumeMounts for the ClickHouse Keeper container(s)                                                                                                                                 | `[]`                                |
-| `keeper.sidecars`                                          | Add additional sidecar containers to the ClickHouse Keeper pod(s)                                                                                                                                                               | `[]`                                |
-| `keeper.initContainers`                                    | Add additional init containers to the ClickHouse Keeper pod(s)                                                                                                                                                                  | `[]`                                |
-| `keeper.pdb.create`                                        | Deploy a pdb object for the ClickHouse Keeper pods                                                                                                                                                                              | `true`                              |
-| `keeper.pdb.minAvailable`                                  | Maximum number/percentage of unavailable ClickHouse Keeper replicas                                                                                                                                                             | `""`                                |
-| `keeper.pdb.maxUnavailable`                                | Maximum number/percentage of unavailable ClickHouse Keeper replicas                                                                                                                                                             | `""`                                |
-| `keeper.autoscaling.vpa.enabled`                           | Enable VPA                                                                                                                                                                                                                      | `false`                             |
-| `keeper.autoscaling.vpa.annotations`                       | Annotations for VPA resource                                                                                                                                                                                                    | `{}`                                |
-| `keeper.autoscaling.vpa.controlledResources`               | VPA List of resources that the vertical pod autoscaler can control. Defaults to cpu and memory                                                                                                                                  | `[]`                                |
-| `keeper.autoscaling.vpa.maxAllowed`                        | VPA Max allowed resources for the pod                                                                                                                                                                                           | `{}`                                |
-| `keeper.autoscaling.vpa.minAllowed`                        | VPA Min allowed resources for the pod                                                                                                                                                                                           | `{}`                                |
-| `keeper.autoscaling.vpa.updatePolicy.updateMode`           | Autoscaling update policy Specifies whether recommended updates are applied when a Pod is started and whether recommended updates are applied during the life of a Pod                                                          | `Auto`                              |
-
-### ClickHouse Keeper Traffic Exposure parameters
-
-| Name                                           | Description                                                                                                      | Value       |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------- |
-| `keeper.service.type`                          | ClickHouse Keeper service type                                                                                   | `ClusterIP` |
-| `keeper.service.ports.tcp`                     | ClickHouse Keeper service TCP port                                                                               | `9181`      |
-| `keeper.service.ports.tcpSecure`               | ClickHouse Keeper service TCP (secure) port                                                                      | `9281`      |
-| `keeper.service.ports.raft`                    | ClickHouse Keeper service Raft port                                                                              | `9234`      |
-| `keeper.service.nodePorts.tcp`                 | Node port for ClickHouse Keeper service TCP port                                                                 | `""`        |
-| `keeper.service.nodePorts.tcpSecure`           | Node port for ClickHouse Keeper service TCP (secure) port                                                        | `""`        |
-| `keeper.service.nodePorts.raft`                | Node port for ClickHouse Keeper service Raft port                                                                | `""`        |
-| `keeper.service.clusterIP`                     | ClickHouse Keeper service Cluster IP                                                                             | `""`        |
-| `keeper.service.loadBalancerIP`                | ClickHouse Keeper service Load Balancer IP                                                                       | `""`        |
-| `keeper.service.loadBalancerSourceRanges`      | ClickHouse Keeper service Load Balancer sources                                                                  | `[]`        |
-| `keeper.service.externalTrafficPolicy`         | ClickHouse Keeper service external traffic policy                                                                | `Cluster`   |
-| `keeper.service.annotations`                   | Additional custom annotations for ClickHouse Keeper service                                                      | `{}`        |
-| `keeper.service.extraPorts`                    | Extra ports to expose in ClickHouse Keeper service (normally used with the `sidecars` value)                     | `[]`        |
-| `keeper.service.sessionAffinity`               | Control where client requests go, to the same pod or round-robin                                                 | `None`      |
-| `keeper.service.sessionAffinityConfig`         | Additional settings for the sessionAffinity                                                                      | `{}`        |
-| `keeper.service.headless.annotations`          | Annotations for the headless service.                                                                            | `{}`        |
-| `keeper.service.headless.extraPorts`           | Optionally specify extra ports to expose for the headless service.                                               | `[]`        |
-| `keeper.networkPolicy.enabled`                 | Specifies whether a NetworkPolicy should be created                                                              | `true`      |
-| `keeper.networkPolicy.allowExternal`           | Don't require client label for connections                                                                       | `true`      |
-| `keeper.networkPolicy.allowExternalEgress`     | Allow the pod to access any range of port and all destinations.                                                  | `true`      |
-| `keeper.networkPolicy.addExternalClientAccess` | Allow access from pods with client label set to "true". Ignored if `keeper.networkPolicy.allowExternal` is true. | `true`      |
-| `keeper.networkPolicy.extraIngress`            | Add extra ingress rules to the NetworkPolicy                                                                     | `[]`        |
-| `keeper.networkPolicy.extraEgress`             | Add extra ingress rules to the NetworkPolicy                                                                     | `[]`        |
-| `keeper.networkPolicy.ingressNSMatchLabels`    | Labels to match to allow traffic from other namespaces                                                           | `{}`        |
-| `keeper.networkPolicy.ingressNSPodMatchLabels` | Pod labels to match to allow traffic from other namespaces                                                       | `{}`        |
-
-### ClickHouse Keeper Persistence parameters
-
-| Name                                                      | Description                                                                                                                                    | Value                        |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `keeper.persistentVolumeClaimRetentionPolicy.enabled`     | Controls if and how PVCs are deleted during the lifecycle of a StatefulSet                                                                     | `false`                      |
-| `keeper.persistentVolumeClaimRetentionPolicy.whenScaled`  | Volume retention behavior when the replica count of the StatefulSet is reduced                                                                 | `Retain`                     |
-| `keeper.persistentVolumeClaimRetentionPolicy.whenDeleted` | Volume retention behavior that applies when the StatefulSet is deleted                                                                         | `Retain`                     |
-| `keeper.persistence.enabled`                              | Enable ClickHouse Keeper data persistence using PVC                                                                                            | `true`                       |
-| `keeper.persistence.existingClaim`                        | A manually managed Persistent Volume and Claim                                                                                                 | `""`                         |
-| `keeper.persistence.storageClass`                         | PVC Storage Class for ClickHouse Keeper data volume                                                                                            | `""`                         |
-| `keeper.persistence.accessModes`                          | Persistent Volume Access Modes                                                                                                                 | `["ReadWriteOnce"]`          |
-| `keeper.persistence.size`                                 | PVC Storage Request for ClickHouse Keeper data volume                                                                                          | `8Gi`                        |
-| `keeper.persistence.annotations`                          | Annotations for the PVC                                                                                                                        | `{}`                         |
-| `keeper.persistence.labels`                               | Labels for the PVC                                                                                                                             | `{}`                         |
-| `keeper.persistence.selector`                             | Selector to match an existing Persistent Volume for ClickHouse Keeper data PVC. If set, the PVC can't have a PV dynamically provisioned for it | `{}`                         |
-| `keeper.persistence.dataSource`                           | Custom PVC data source                                                                                                                         | `{}`                         |
-| `keeper.persistence.mountPath`                            | Mount path of the ClickHouse Keeper data volume                                                                                                | `/bitnami/clickhouse-keeper` |
-
-### Other Parameters
-
-| Name                                          | Description                                                      | Value   |
-| --------------------------------------------- | ---------------------------------------------------------------- | ------- |
-| `serviceAccount.create`                       | Specifies whether a ServiceAccount should be created             | `true`  |
-| `serviceAccount.name`                         | The name of the ServiceAccount to use.                           | `""`    |
-| `serviceAccount.annotations`                  | Additional Service Account annotations (evaluated as a template) | `{}`    |
-| `serviceAccount.automountServiceAccountToken` | Automount service account token for the server service account   | `false` |
-
-### Prometheus metrics parameters
-
-| Name                                       | Description                                                                                            | Value   |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ------- |
-| `metrics.enabled`                          | Enable the export of Prometheus metrics                                                                | `false` |
-| `metrics.podAnnotations`                   | Pod annotations for enabling Prometheus to access the metrics endpoint                                 | `{}`    |
-| `metrics.serviceMonitor.enabled`           | if `true`, creates a Prometheus Operator ServiceMonitor (also requires `metrics.enabled` to be `true`) | `false` |
-| `metrics.serviceMonitor.namespace`         | Namespace in which Prometheus is running                                                               | `""`    |
-| `metrics.serviceMonitor.annotations`       | Additional custom annotations for the ServiceMonitor                                                   | `{}`    |
-| `metrics.serviceMonitor.labels`            | Extra labels for the ServiceMonitor                                                                    | `{}`    |
-| `metrics.serviceMonitor.jobLabel`          | The name of the label on the target service to use as the job name in Prometheus                       | `""`    |
-| `metrics.serviceMonitor.honorLabels`       | honorLabels chooses the metric's labels on collisions with target labels                               | `false` |
-| `metrics.serviceMonitor.interval`          | Interval at which metrics should be scraped.                                                           | `""`    |
-| `metrics.serviceMonitor.scrapeTimeout`     | Timeout after which the scrape is ended                                                                | `""`    |
-| `metrics.serviceMonitor.metricRelabelings` | Specify additional relabeling of metrics                                                               | `[]`    |
-| `metrics.serviceMonitor.relabelings`       | Specify general relabeling                                                                             | `[]`    |
-| `metrics.serviceMonitor.selector`          | Prometheus instance selector labels                                                                    | `{}`    |
-| `metrics.prometheusRule.enabled`           | Create a PrometheusRule for Prometheus Operator                                                        | `false` |
-| `metrics.prometheusRule.namespace`         | Namespace for the PrometheusRule Resource (defaults to the Release Namespace)                          | `""`    |
-| `metrics.prometheusRule.additionalLabels`  | Additional labels that can be used so PrometheusRule will be discovered by Prometheus                  | `{}`    |
-| `metrics.prometheusRule.rules`             | PrometheusRule definitions                                                                             | `[]`    |
-
-### External ClickHouse Keeper / Zookeeper parameters
-
-| Name                        | Description                                                   | Value  |
-| --------------------------- | ------------------------------------------------------------- | ------ |
-| `externalZookeeper.servers` | List of external ClickHouse Keeper / Zookeeper servers to use | `[]`   |
-| `externalZookeeper.port`    | Port of the ClickHouse Keeper / Zookeeper servers             | `2888` |
-
-See <https://github.com/bitnami/readme-generator-for-helm> to create the table.
-
-The above parameters map to the env variables defined in [bitnami/clickhouse](https://github.com/bitnami/containers/tree/main/bitnami/clickhouse). For more information please refer to the [bitnami/clickhouse](https://github.com/bitnami/containers/tree/main/bitnami/clickhouse) image documentation.
-
-Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example,
-
-```console
-helm install my-release \
-  --set auth.username=admin \
-  --set auth.password=password \
-    oci://REGISTRY_NAME/REPOSITORY_NAME/clickhouse
+```yaml
+cluster:
+  clickhouse:
+    podTemplate:
+      nodeHostnameKey: ""
 ```
 
-> Note: You need to substitute the placeholders `REGISTRY_NAME` and `REPOSITORY_NAME` with a reference to your Helm chart registry and repository. For example, in the case of Bitnami, you need to use `REGISTRY_NAME=registry-1.docker.io` and `REPOSITORY_NAME=bitnamicharts`.
+Switching an existing cluster from strict to best-effort can deadlock: the
+operator updates replicas one at a time and waits for each to become ready,
+while the not-yet-updated replicas still carry the required PodAntiAffinity that
+blocks the new pod. Apply the change before scaling up, or drop the stale rule
+from the remaining StatefulSets to let the rollout finish.
 
-The above command sets the ClickHouse administrator account username and password to `admin` and `password` respectively.
+### Deploying with ArgoCD
 
-> NOTE: Once this chart is deployed, it is not possible to change the application's access credentials, such as usernames or passwords, using Helm. To change these application credentials after deployment, delete any persistent volumes (PVs) used by the chart and re-deploy it, or use the application's built-in administrative tools if available.
+One Application installs operator + cluster in order. There is nothing to turn
+on: every chart-owned resource ships an `argocd.argoproj.io/sync-wave`, which a
+plain `helm install` ignores. Operator resources are un-annotated and therefore
+wave 0, and the cluster follows in dependency order:
 
-Alternatively, a YAML file that specifies the values for the above parameters can be provided while installing the chart. For example,
+| Wave | Resources |
+|------|-----------|
+| 0 | operator (Deployment, CRDs, RBAC, webhooks) |
+| 1 | cert-manager `Certificate`s, when `tls.createCertificates` |
+| 2 | `CHK`, pre-created per-replica PVCs |
+| 3 | `CHI`, the ClusterIP client Service |
+| 4 | Rotel Deployment / Service / HPA |
 
-```console
-helm install my-release -f values.yaml oci://REGISTRY_NAME/REPOSITORY_NAME/clickhouse
+The CRs also carry `SkipDryRunOnMissingResource=true`, so the first sync does not
+fail dry-run against CRDs the operator has not registered yet. The rotel DDL and
+TTL Jobs carry Helm `post-install/post-upgrade` hooks, which ArgoCD runs as a
+PostSync hook — after every wave.
+
+**Keeper is a wave ahead of ClickHouse on purpose.** The operator does not gate
+the ClickHouse rollout on Keeper. Its `reconcileClusterRevisions` step blocks
+only while the `CHK` *object* is missing; once the object exists, a
+`Ready` condition that is still false is logged and passed over
+([`internal/controller/clickhouse/sync.go`](https://github.com/ClickHouse/clickhouse-operator)).
+The keeper endpoint list is built from `spec.replicas` rather than from running
+pods, so the ClickHouse config renders and the StatefulSets roll while Keeper has
+no quorum. Nothing corrupts — the server retries the connection — but `ON CLUSTER`
+DDL fails and replicated tables stay read-only until quorum forms. The wave split
+is what actually orders the two, which makes the health checks below load-bearing
+rather than cosmetic.
+
+```yaml
+apiVersion: argoproj.io/v1beta1
+kind: Application
+metadata:
+  name: clickhouse
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Marz32onE/clickhouse-aio
+    targetRevision: main
+    path: .
+    helm:
+      values: |
+        cluster:
+          clickhouse:
+            defaultUser:
+              existingSecret: ch-default-password   # create it out-of-band
+              autoGenerate: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clickhouse
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true    # operator CRDs exceed client-side apply limits
+    retry:
+      limit: 5
+      backoff: {duration: 20s, factor: 2, maxDuration: 3m}
 ```
 
-> Note: You need to substitute the placeholders `REGISTRY_NAME` and `REPOSITORY_NAME` with a reference to your Helm chart registry and repository. For example, in the case of Bitnami, you need to use `REGISTRY_NAME=registry-1.docker.io` and `REPOSITORY_NAME=bitnamicharts`.
-> **Tip**: You can use the default [values.yaml](https://github.com/bitnami/charts/tree/main/bitnami/clickhouse/values.yaml)
+**Register the CR health checks — the waves are inert without them.** ArgoCD
+calls an unknown custom resource Healthy the moment it is created, so wave 3
+starts while Keeper is still electing a leader and the whole split collapses back
+to apply-ordering. Add to `argocd-cm`:
 
-## Troubleshooting
+```yaml
+resource.customizations.health.clickhouse-keeper.altinity.com_ClickHouseKeeperInstallation: |
+  hs = {}
+  if obj.status ~= nil and obj.status.conditions ~= nil then
+    for _, c in ipairs(obj.status.conditions) do
+      if c.type == "Ready" and c.status == "True" then
+        hs.status = "Healthy"; hs.message = c.message; return hs
+      end
+    end
+  end
+  hs.status = "Progressing"; hs.message = "waiting for quorum"
+  return hs
+resource.customizations.health.clickhouse.altinity.com_ClickHouseInstallation: |
+  hs = {}
+  if obj.status ~= nil and obj.status.conditions ~= nil then
+    for _, c in ipairs(obj.status.conditions) do
+      if c.type == "Ready" and c.status == "True" then
+        hs.status = "Healthy"; hs.message = c.message; return hs
+      end
+    end
+  end
+  hs.status = "Progressing"; hs.message = "waiting for replicas"
+  return hs
+```
 
-Find more information about how to deal with common errors related to Bitnami's Helm charts in [this troubleshooting guide](https://docs.bitnami.com/general/how-to/troubleshoot-helm-chart-issues).
+Both gate on `Ready`, not `Healthy`. On a `CHK` the operator sets
+`Ready` from quorum — one leader plus `ceil(n/2) - 1` followers — while `Healthy`
+means *every* replica is serving. Quorum is what ClickHouse needs, and gating on
+`Healthy` would stall wave 3 on a single unavailable Keeper pod that the cluster
+tolerates fine.
 
-## Upgrading
+**The password has to come from an existing Secret** (or a fixed value). ArgoCD
+renders manifests without cluster access, so the `lookup` behind
+`defaultUser.autoGenerate` finds nothing and mints a new password on every sync.
+The chart cannot detect this — a renderer gives no way to tell "no cluster" from
+"first install" — so it does not try to fail fast; setting
+`defaultUser.existingSecret` is on you. If `autoGenerate` has to stay, stop
+ArgoCD from reconciling the value it re-renders:
 
-### To 9.0.0
+```yaml
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: clickhouse-cluster-default-password   # <release>-cluster-default-password
+      jsonPointers:
+        - /data
+```
 
-This major release replaces ZooKeeper with ClickHouse Keeper by default, as a consequence, **ZooKeeper is no longer a chart dependency and every related parameter has been removed.**. In addition, ClickHouse Keeper is no longer started as an additional process on ClickHouse containers but as a separate StatefulSet. This means that the `keeper.*` parameters are now used to configure the ClickHouse Keeper StatefulSet.
+### Offline / air-gapped install
 
-> Note: It still possible to use existing ZooKeeper servers to provide coordination capabilities using the `externalZookeeper.*` parameters.
+The operator chart is **vendored unpacked** at `charts/clickhouse-operator-helm/`
+and referenced via `file://`, so `helm dependency update`, `lint`, and `install`
+need no registry access — clone and install.
 
-Other notable changes:
+Still required in the air-gapped environment: the **container images**
+(mirror to your private registry and override the repositories):
 
-- `defaultConfigurationOverrides`, `extraOverrides` and `usersExtraOverrides` are deprecated in favor of `configuration`, `configdFiles` and `usersdFiles`, respectively.
-- `existingOverridesConfigmap`, `extraOverridesConfigmap|extraOverridesSecret` and `usersExtraOverridesConfigmap|usersExtraOverridesSecret` are deprecated in favor of `existingConfigmap`, `existingConfigdConfigmap` and `existingUsersdConfigmap|existingUsersdSecret`, respectively.
-- `tls.autoGenerated` boolean is now an object with extended configuration options.
-- `externalAccess.service.*` parameters have been moved under `service.*` parameter. In order to create a service per replica, set `service.perReplicaAccess` to `true`.
-- `volumePermissions` parameters have been moved under `defaultInitContainers` parameter.
+```
+docker.io/clickhouse/clickhouse-server:26.7.1.1315
+docker.io/clickhouse/clickhouse-keeper:26.7.1.1315
+ghcr.io/clickhouse/clickhouse-operator:v0.0.7
+docker.io/streamfold/rotel:v0.2.2
+docker.io/streamfold/rotel-clickhouse-ddl:v0.2.2
+quay.io/jetstack/cert-manager-*:v1.21.0
+```
 
-In order to upgrade from `8.y.z` to this major version, if ZooKeeper was used on your existing release, you have two alternatives:
+Every one of those is a `registry` / `repository` / `tag` triple in
+`values.yaml`, so pointing at a mirror is `--set ...image.registry=my.registry`
+rather than a rewrite of each repository string.
 
-- Stop ZooKeeper servers and migrate the ZooKeeper data to ClickHouse Keeper data as explained in the [official documentation](https://clickhouse.com/docs/guides/sre/keeper/clickhouse-keeper#migration-from-zookeeper).
-- Scale down your existing ZooKeeper StatefulSet to 0 replicas keeping its associated PVC(s). Then, deploy the Bitnami ZooKeeper Helm chart independently reusing PVC(s) that were used by your previous ZooKeeper servers. Finally, upgrade using the `externalZookeeper.*` parameters to connect to the existing ZooKeeper servers.
+To refresh the vendored operator chart when a new release ships:
 
-### To 7.1.0
+```bash
+rm -rf charts/clickhouse-operator-helm
+helm pull oci://ghcr.io/clickhouse/clickhouse-operator-helm \
+  --version <new-version> --untar --untardir charts/
+# bump dependencies[].version in Chart.yaml, then:
+helm dependency update
+```
 
-This version introduces image verification for security purposes. To disable it, set `global.security.allowInsecureImages` to `true`. More details at [GitHub issue](https://github.com/bitnami/charts/issues/30850).
+### Operator-only install
 
-### To 7.0.0
+Same namespace as the cluster — `operator.rbac.namespaceScoped` scopes the operator's
+Role to its own namespace. See "Operator RBAC scope" above.
 
-This major updates the Zookeeper version from 3.8.x to 3.9.x. Instead of overwritting it in this chart values, it will automatically use the version defined in the zookeeper subchart.
+```bash
+helm upgrade --install ch-operator . -n clickhouse --create-namespace \
+  --set cluster.enabled=false
+```
 
-### To 6.0.0
+### Cluster-only (operator already installed)
 
-This major bump changes the following security defaults:
+```bash
+helm upgrade --install ch-cluster . -n clickhouse --create-namespace \
+  --set operator.enabled=false
+```
 
-- `runAsGroup` is changed from `0` to `1001`
-- `readOnlyRootFilesystem` is set to `true`
-- `resourcesPreset` is changed from `none` to the minimum size working in our test suites (NOTE: `resourcesPreset` is not meant for production usage, but `resources` adapted to your use case).
-- `global.compatibility.openshift.adaptSecurityContext` is changed from `disabled` to `auto`.
-- The zookeeper subchart has been bumped to branch 13.x.x, with the same changes as described above.
+## OTLP ingestion (Rotel) + ClickStack UI
 
-This could potentially break any customization or init scripts used in your deployment. If this is the case, change the default values to the previous ones.
+The chart deploys [Rotel](https://github.com/rotel-dev/rotel), a lightweight Rust
+OTLP collector, writing traces and logs into ClickHouse with the standard
+OpenTelemetry ClickHouse-exporter schema (`otel.otel_traces`, `otel.otel_logs`).
+A post-install Job creates the schema via `rotel-clickhouse-ddl`
+(`ReplicatedMergeTree` + `ON CLUSTER default` by default — matches the
+operator's cluster/macros config).
 
-### To 2.0.0
+Point your apps / SDKs at:
 
-This major updates the Zookeeper subchart to it newest major, 11.0.0. For more information on this subchart's major, please refer to [zookeeper upgrade notes](https://github.com/bitnami/charts/tree/main/bitnami/zookeeper#to-1100).
+```
+OTLP/gRPC  <cluster-name>-rotel.<namespace>.svc:4317
+OTLP/HTTP  <cluster-name>-rotel.<namespace>.svc:4318
+```
 
-## License
+`cluster.rotel.telemetry.{traces,logs,metrics}` selects the signals. A signal
+turned off gets no tables from the DDL Job, no exporter in the deployment, and
+its OTLP receiver closed — the three are generated from one list and cannot
+drift apart. Agent stdout (`logFormat`) is pod logs only and is never written
+to ClickHouse.
 
-Copyright &copy; 2025 Broadcom. The term "Broadcom" refers to Broadcom Inc. and/or its subsidiaries.
+### Table names
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+Rotel builds table names as `<prefix>_<signal>`; only the prefix is
+configurable. `exporter.tablePrefix` sets the default, and each signal can
+override it:
 
-<http://www.apache.org/licenses/LICENSE-2.0>
+```yaml
+cluster:
+  rotel:
+    exporter:
+      tablePrefix: otel
+      traces: {tablePrefix: app}   # otel.app_traces
+      logs:   {tablePrefix: sys}   # otel.sys_logs
+```
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Signals sharing a prefix share one exporter and one connection pool; differing
+prefixes get one exporter each. The database is shared. Changing a prefix on a
+live install creates a new empty table — the old one keeps its rows and ages
+out under its own TTL.
+
+### Autoscaling the collector
+
+```bash
+helm upgrade ch-aio . -n clickhouse \
+  --set cluster.rotel.autoscaling.enabled=true \
+  --set cluster.rotel.autoscaling.maxReplicas=6
+```
+
+Renders an `autoscaling/v2` HPA on CPU (75% of `resources.requests.cpu` by
+default) and stops rendering `replicas` on the Deployment, so a helm upgrade no
+longer resets what the HPA chose. Needs metrics-server. Scaling out multiplies
+in-flight ClickHouse inserts: with `async_insert` on, more replicas means more
+smaller batches, so raise batch sizes before raising `maxReplicas`.
+
+### Rotel's own runtime metrics
+
+```bash
+helm upgrade ch-aio . -n clickhouse \
+  --set cluster.rotel.internalMetrics.enabled=true \
+  --set cluster.rotel.internalMetrics.endpoint=http://vmsingle.monitoring.svc:8428/opentelemetry
+```
+
+Adds an OTLP/HTTP exporter to VictoriaMetrics alongside the ClickHouse ones and
+routes Rotel's internal metrics to it (the base URL gets `/v1/metrics`
+appended). ClickHouse keeps whatever signals `telemetry` enables.
+
+Rotel only starts its internal-metrics pipeline when the regular metrics
+pipeline is active, so enabling this also holds the OTLP metrics receiver open.
+The consequence depends on `telemetry.metrics`:
+
+| `telemetry.metrics` | App metrics sent to Rotel | Rotel's own metrics |
+|---------------------|---------------------------|---------------------|
+| `false` (default) | VictoriaMetrics | VictoriaMetrics |
+| `true` | ClickHouse `<prefix>_metrics_*` | VictoriaMetrics |
+
+Notes:
+- Port `9363` is reserved by the operator for Prometheus metrics — the
+  validation webhook rejects it in `additionalPorts`, and no `prometheus`
+  entry is needed in `extraConfig`.
+- The operator's version-probe Job defaults to 256Mi and OOMs with
+  ClickHouse ≥ 26.x images; the chart bumps it via
+  `cluster.clickhouse.versionProbe.resources`.
+
+### Query endpoint
+
+Query clients — Grafana, ClickStack, `clickhouse-client`, anything running a
+`SELECT` — connect to a ClusterIP Service the chart creates:
+
+```
+HTTP    <cluster-name>-clickhouse-client.<namespace>.svc:8123
+Native  <cluster-name>-clickhouse-client.<namespace>.svc:9000
+```
+
+With `cluster.tls.enabled`, those become `8443` / `9440`, and the plaintext pair
+disappears once `tls.required` is also set — the same rule the operator applies
+to the server's own listeners.
+
+This exists because the operator's `<cluster-name>-clickhouse-headless` Service
+is not a client endpoint. It is headless, so there is no VIP and a client
+resolves it straight to Pod IPs; a connection pool then holds those IPs and
+keeps using a Pod after it goes unhealthy. And the operator sets
+`publishNotReadyAddresses: true` on it, so its DNS deliberately hands out Pods
+that are still starting. The ClusterIP Service selects the same Pods
+(labels set by the Altinity operator, e.g. `clickhouse.altinity.com/chi`, `clickhouse.altinity.com/app=chop`) with
+kube-proxy in front, so only ready endpoints receive traffic and liveness is
+re-checked per connection rather than at DNS-resolution time.
+
+Two things it does not do:
+
+- **Reach outside the cluster.** ClusterIP is in-cluster only. Grafana Cloud or
+  a Grafana in another cluster needs an Ingress or a LoadBalancer; this chart
+  creates neither.
+- **Survive sharding.** With `shards > 1` it load-balances across shards, and
+  each query returns whichever shard answered. Same trap as the rotel write
+  path — see [Sharding is not a values-only change](#sharding-is-not-a-values-only-change).
+
+Round-robin across replicas is correct at `shards: 1` (every replica holds the
+full dataset) but not deterministic: replicas sit at different points in
+replication, so a dashboard comparing values across refreshes can watch a
+counter go backwards. `cluster.clickhouse.service.sessionAffinity: ClientIP`
+pins each client to one replica. Set `cluster.clickhouse.service.enabled: false`
+to drop the Service and go back to the headless name.
+
+### Visualization
+
+ClickHouse **26.2+** embeds the ClickStack (HyperDX) UI in the server binary at
+`http://<cluster-name>-clickhouse-client.<namespace>.svc:8123/clickstack` —
+auto-detects the `otel_*` tables, gives
+search, trace waterfalls, chart explorer, and service maps with zero extra
+components. No persistence for dashboards/alerts (browser-local state) — good
+for dev/small teams; for full ClickStack (alerts, saved dashboards, auth) run
+[HyperDX + MongoDB](https://clickhouse.com/docs/use-cases/observability/clickstack/deployment)
+against this cluster, or use Grafana with the ClickHouse datasource.
+
+## Scaling path (when the business grows)
+
+1. Raise `cluster.clickhouse.resources` (vertical)
+2. Raise `cluster.clickhouse.replicas` past the default `3`
+3. Grow PVC size (needs expandable StorageClass)
+4. Shorten `cluster.rotel.exporter.ttl` before adding capacity for data you do
+   not query
+5. Enable TLS + network policies
+6. Add shards — **only together with the Distributed-table work below**
+
+### Sharding is not a values-only change
+
+`cluster.clickhouse.shards` defaults to `1` and should stay there until the
+dataset genuinely outgrows one node. Raising it on its own produces wrong
+query results, silently:
+
+- The operator gives each shard its own Keeper path (`/clickhouse/tables/{uuid}/{shard}`),
+  so shards replicate independently and never exchange rows.
+- Rotel writes to the headless Service, whose DNS round-robins across every
+  pod, so rows land in whichever shard answered.
+- `otel.otel_traces` is a plain `ReplicatedMergeTree`. A query reads the local
+  table only, so it returns one shard's rows — no error, no warning.
+
+`rotel-clickhouse-ddl` cannot create the missing piece (`--engine` accepts only
+`MergeTree`, `ReplicatedMergeTree`, `Null`), so sharding means adding a
+`Distributed` layer to this chart:
+
+- Have the DDL Job build the local tables under a separate prefix and create
+  `otel.otel_traces` as `Distributed(default, otel, <local>, cityHash64(TraceId))`,
+  so the name rotel writes and ClickStack auto-detects is the correct one.
+  Hashing on `TraceId` keeps one trace's spans on a single shard.
+- Point the TTL Job at the local tables: `Distributed` rejects `MODIFY TTL`,
+  mutations and `OPTIMIZE`.
+- Point the user grants and row filters at the Distributed table. Policies do
+  apply through it, but a granted table with no filter returns every user's
+  rows, so both have to move together.
+
+Adding the layer later is cheap: `RENAME TABLE` is a metadata-only operation,
+so the migration is a rename plus a `CREATE TABLE`, not a data copy.
+
+## Uninstall
+
+```bash
+helm uninstall ch-aio -n clickhouse
+# PVCs are retained by default (reclaimPolicy: Retain) — delete carefully
+kubectl delete pvc -n clickhouse -l app.kubernetes.io/instance=ch-aio
+# CRDs are cluster-scoped and survive uninstall (operator crdHook / Helm crds/)
+```
+
+## References
+
+- [Altinity Operator Quick Start](https://github.com/Altinity/clickhouse-operator/blob/master/docs/quick_start.md)
+- [Altinity Operator docs](https://docs.altinity.com/altinitykubernetesoperator/)
+- [Altinity Helm charts](https://github.com/Altinity/helm-charts/tree/main/charts/clickhouse)
+- [Rotel](https://github.com/streamfold/rotel) — collector and ClickHouse exporter

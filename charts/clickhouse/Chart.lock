@@ -1,6 +1,9 @@
 dependencies:
-- name: common
-  repository: oci://registry-1.docker.io/bitnamicharts
-  version: 2.31.4
-digest: sha256:fc442e77200e1914dd46fe26490dcf62f44caa51db673c2f8e67d5319cd4c163
-generated: "2025-08-14T14:33:47.960443529Z"
+- name: altinity-clickhouse-operator
+  repository: file://charts/altinity-clickhouse-operator
+  version: 0.27.2
+- name: cluster
+  repository: file://charts/cluster
+  version: 0.2.0
+digest: sha256:74c0b9fe6a655a8d9eb129fd5a8881bcdc4ef6c3ffd2e3cf13a94fd3282c36d3
+generated: "2026-07-31T04:19:29.062476+08:00"

@@ -1,0 +1,253 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $chName := include "cluster.clickhouseName" . }}
+{{- $podTemplate := "clickhouse-pod" }}
+{{- $dataVct := .Values.clickhouse.persistence.volumeName | default "clickhouse-data" }}
+{{- $svcTemplate := "clickhouse-client" }}
+{{- $keeperName := .Values.clickhouse.keeperClusterRef.name | default (include "cluster.keeperName" .) }}
+{{- if and .Values.keeper.enabled (not .Values.clickhouse.keeperClusterRef.name) }}
+{{- $keeperName = include "cluster.keeperName" . }}
+{{- end }}
+{{- $clusterName := .Values.clickhouse.clusterName | default "default" }}
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: {{ $chName }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+    {{- with include "cluster.stringMap" .Values.clickhouse.labels }}
+    {{- . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- include "cluster.argocdAnnotations" "clickhouse" | nindent 4 }}
+    {{- with include "cluster.stringMap" .Values.clickhouse.annotations }}
+    {{- . | nindent 4 }}
+    {{- end }}
+spec:
+  defaults:
+    templates:
+      podTemplate: {{ $podTemplate }}
+      {{- if .Values.clickhouse.persistence.enabled | default true }}
+      dataVolumeClaimTemplate: {{ $dataVct }}
+      {{- end }}
+      {{- if .Values.clickhouse.service.enabled }}
+      serviceTemplate: {{ $svcTemplate }}
+      {{- end }}
+  templates:
+    podTemplates:
+      - name: {{ $podTemplate }}
+        metadata:
+          labels:
+            {{- include "cluster.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: clickhouse
+            {{- with include "cluster.operatorResourceLabels" (dict "root" $ "extra" .Values.clickhouse.labels) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "cluster.stringMap" .Values.clickhouse.annotations }}
+          annotations:
+            {{- . | nindent 12 }}
+          {{- end }}
+        {{- if or .Values.clickhouse.antiAffinity .Values.clickhouse.podTemplate.nodeHostnameKey .Values.clickhouse.podTemplate.topologyZoneKey }}
+        podDistribution:
+          {{- if or .Values.clickhouse.antiAffinity .Values.clickhouse.podTemplate.nodeHostnameKey }}
+          - type: ClickHouseAntiAffinity
+            scope: {{ .Values.clickhouse.antiAffinityScope | default "ClickHouseInstallation" | quote }}
+            topologyKey: {{ .Values.clickhouse.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname" | quote }}
+          {{- end }}
+          {{- if .Values.clickhouse.podTemplate.topologyZoneKey }}
+          - type: MaxNumberPerNode
+            number: 1
+            topologyKey: {{ .Values.clickhouse.podTemplate.topologyZoneKey | quote }}
+          {{- end }}
+        {{- end }}
+        spec:
+          securityContext:
+            fsGroup: 101
+          containers:
+            - name: clickhouse
+              image: {{ include "cluster.image" .Values.clickhouse.image | quote }}
+              imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+              resources:
+                {{- toYaml .Values.clickhouse.resources | nindent 16 }}
+              ports:
+                - name: http
+                  containerPort: 8123
+                - name: client
+                  containerPort: 9000
+                - name: interserver
+                  containerPort: 9009
+                - name: metrics
+                  containerPort: 9363
+                {{- with .Values.clickhouse.additionalPorts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with .Values.clickhouse.containerTemplate.env }}
+              env:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: {{ $dataVct }}
+                  mountPath: /var/lib/clickhouse
+                {{- with .Values.clickhouse.containerTemplate.volumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          {{- with .Values.clickhouse.podTemplate.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.clickhouse.podTemplate.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.clickhouse.podTemplate.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.clickhouse.podTemplate.topologySpreadConstraints }}
+          topologySpreadConstraints:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.clickhouse.podTemplate.volumes }}
+          volumes:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    {{- if .Values.clickhouse.persistence.enabled | default true }}
+    volumeClaimTemplates:
+      - name: {{ $dataVct }}
+        provisioner: Operator
+        reclaimPolicy: Retain
+        {{- with include "cluster.stringMap" .Values.clickhouse.persistence.annotations }}
+        metadata:
+          annotations:
+            {{- . | nindent 12 }}
+        {{- end }}
+        spec:
+          accessModes:
+            {{- toYaml .Values.clickhouse.persistence.accessModes | nindent 12 }}
+          {{- with .Values.clickhouse.persistence.storageClassName }}
+          storageClassName: {{ . | quote }}
+          {{- end }}
+          resources:
+            requests:
+              storage: {{ .Values.clickhouse.persistence.size | quote }}
+    {{- end }}
+    {{- if .Values.clickhouse.service.enabled }}
+    serviceTemplates:
+      - name: {{ $svcTemplate }}
+        generateName: {{ include "cluster.clickhouseServiceName" . | quote }}
+        metadata:
+          labels:
+            {{- include "cluster.labels" . | nindent 12 }}
+            app.kubernetes.io/component: clickhouse
+          {{- $svcAnnotations := merge (include "cluster.argocdAnnotations" "clickhouse-service" | fromYaml) (.Values.clickhouse.service.annotations | default dict) }}
+          annotations:
+            {{- toYaml $svcAnnotations | nindent 12 }}
+        spec:
+          type: ClusterIP
+          {{- with .Values.clickhouse.service.sessionAffinity }}
+          sessionAffinity: {{ . }}
+          {{- end }}
+          ports:
+            - name: http
+              port: 8123
+              targetPort: 8123
+            - name: tcp
+              port: 9000
+              targetPort: 9000
+            - name: metrics
+              port: 9363
+              targetPort: 9363
+    {{- end }}
+  configuration:
+    {{- /* ---- users ---- */}}
+    users:
+      default/networks/ip:
+        - "0.0.0.0/0"
+        - "::/0"
+      default/access_management: "1"
+      default/named_collection_control: "1"
+      {{- $pwType := .Values.clickhouse.defaultUser.passwordType | default "password" }}
+      {{- if eq $pwType "password_sha256_hex" }}
+      default/password_sha256_hex:
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "cluster.passwordSecretName" . | quote }}
+            key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
+      {{- else if eq $pwType "password_double_sha1_hex" }}
+      default/password_double_sha1_hex:
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "cluster.passwordSecretName" . | quote }}
+            key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
+      {{- else }}
+      default/password:
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "cluster.passwordSecretName" . | quote }}
+            key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
+      {{- end }}
+      {{- /* Extra users: Altinity flat keys, or nested map converted below */}}
+      {{- include "cluster.altinityUsers" . | nindent 6 }}
+    {{- /* ---- profiles ---- */}}
+    {{- $profiles := dig "extraUsersConfig" "profiles" (dict) .Values.clickhouse.settings }}
+    {{- if $profiles }}
+    profiles:
+      {{- range $profile, $settings := $profiles }}
+      {{- range $k, $v := $settings }}
+      {{ $profile }}/{{ $k }}: {{ include "cluster.configValue" $v | quote }}
+      {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- /* ---- server settings ---- */}}
+    settings:
+      prometheus/endpoint: /metrics
+      prometheus/port: "9363"
+      prometheus/metrics: "true"
+      prometheus/events: "true"
+      prometheus/asynchronous_metrics: "true"
+      prometheus/status_info: "true"
+      {{- with .Values.clickhouse.settings.extraConfig }}
+      {{- include "cluster.flattenSettings" . | nindent 6 }}
+      {{- end }}
+    clusters:
+      - name: {{ $clusterName | quote }}
+        layout:
+          shardsCount: {{ .Values.clickhouse.shards }}
+          replicasCount: {{ .Values.clickhouse.replicas }}
+        {{- if .Values.clickhouse.clusterSecret.enabled }}
+        {{- if .Values.clickhouse.clusterSecret.secure }}
+        secure: "yes"
+        {{- end }}
+        secret:
+          {{- if .Values.clickhouse.clusterSecret.auto }}
+          auto: "true"
+          {{- else if .Values.clickhouse.clusterSecret.value }}
+          value: {{ .Values.clickhouse.clusterSecret.value | quote }}
+          {{- else if and .Values.clickhouse.clusterSecret.valueFrom .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.name }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.name | quote }}
+              key: {{ .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.key | default "secret" | quote }}
+          {{- end }}
+        {{- end }}
+    {{- /* Keeper: prefer CHK reference; fall back to explicit host list */}}
+    {{- if or .Values.keeper.enabled .Values.clickhouse.keeperClusterRef.name .Values.clickhouse.keeper.host }}
+    zookeeper:
+      {{- if .Values.clickhouse.keeper.host }}
+      nodes:
+        - host: {{ .Values.clickhouse.keeper.host | quote }}
+          port: {{ .Values.clickhouse.keeper.port | default 2181 }}
+      {{- else }}
+      keeper:
+        name: {{ $keeperName | quote }}
+        {{- with .Values.clickhouse.keeperClusterRef.namespace }}
+        namespace: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.clickhouse.keeperClusterRef.serviceType }}
+        serviceType: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    {{- else if gt (int .Values.clickhouse.replicas) 1 }}
+    {{- fail "clickhouse.replicas > 1 requires keeper.enabled=true, clickhouse.keeperClusterRef.name, or clickhouse.keeper.host" }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,123 @@
+{{- if .Values.keeper.enabled }}
+{{- $name := include "cluster.keeperName" . }}
+{{- $podTemplate := "keeper-pod" }}
+{{- $dataVct := "keeper-data" }}
+apiVersion: clickhouse-keeper.altinity.com/v1
+kind: ClickHouseKeeperInstallation
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keeper
+    {{- with include "cluster.stringMap" .Values.keeper.labels }}
+    {{- . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- include "cluster.argocdAnnotations" "keeper" | nindent 4 }}
+    {{- with include "cluster.stringMap" .Values.keeper.annotations }}
+    {{- . | nindent 4 }}
+    {{- end }}
+spec:
+  defaults:
+    storageManagement:
+      provisioner: Operator
+      reclaimPolicy: Retain
+    templates:
+      podTemplate: {{ $podTemplate }}
+      dataVolumeClaimTemplate: {{ $dataVct }}
+  configuration:
+    clusters:
+      - name: {{ include "cluster.keeperClusterName" . | quote }}
+        layout:
+          replicasCount: {{ .Values.keeper.replicas }}
+        pdbManaged: "true"
+        pdbMaxUnavailable: 1
+    settings:
+      {{- $settings := .Values.keeper.settings | default dict }}
+      {{- if $settings }}
+      {{- include "cluster.flattenSettings" $settings | nindent 6 }}
+      {{- else }}
+      logger/level: information
+      logger/console: "true"
+      listen_host: "0.0.0.0"
+      keeper_server/four_letter_word_white_list: "ruok,conf,stat,mntr"
+      prometheus/endpoint: /metrics
+      prometheus/port: "7000"
+      prometheus/metrics: "true"
+      prometheus/events: "true"
+      prometheus/asynchronous_metrics: "true"
+      {{- end }}
+  templates:
+    podTemplates:
+      - name: {{ $podTemplate }}
+        metadata:
+          labels:
+            {{- include "cluster.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: keeper
+            {{- with include "cluster.operatorResourceLabels" (dict "root" $ "extra" .Values.keeper.labels) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "cluster.stringMap" .Values.keeper.annotations }}
+          annotations:
+            {{- . | nindent 12 }}
+          {{- end }}
+        {{- /* Anti-affinity / spread: mirror topologyZoneKey + nodeHostnameKey */}}
+        {{- if or .Values.keeper.podTemplate.nodeHostnameKey .Values.keeper.podTemplate.topologyZoneKey .Values.keeper.antiAffinity }}
+        podDistribution:
+          {{- if or .Values.keeper.antiAffinity .Values.keeper.podTemplate.nodeHostnameKey }}
+          - type: MaxNumberPerNode
+            number: 1
+            topologyKey: {{ .Values.keeper.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname" | quote }}
+          {{- end }}
+          {{- if .Values.keeper.podTemplate.topologyZoneKey }}
+          - type: ShardAntiAffinity
+            topologyKey: {{ .Values.keeper.podTemplate.topologyZoneKey | quote }}
+          {{- end }}
+        {{- end }}
+        spec:
+          securityContext:
+            fsGroup: 101
+          containers:
+            - name: clickhouse-keeper
+              image: {{ include "cluster.image" .Values.keeper.image | quote }}
+              imagePullPolicy: {{ .Values.keeper.image.pullPolicy }}
+              resources:
+                {{- toYaml .Values.keeper.resources | nindent 16 }}
+              volumeMounts:
+                - name: {{ $dataVct }}
+                  mountPath: /var/lib/clickhouse-keeper
+          {{- with .Values.keeper.podTemplate.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.keeper.podTemplate.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.keeper.podTemplate.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.keeper.podTemplate.topologySpreadConstraints }}
+          topologySpreadConstraints:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    volumeClaimTemplates:
+      - name: {{ $dataVct }}
+        provisioner: Operator
+        reclaimPolicy: Retain
+        {{- with include "cluster.stringMap" .Values.keeper.persistence.annotations }}
+        metadata:
+          annotations:
+            {{- . | nindent 12 }}
+        {{- end }}
+        spec:
+          accessModes:
+            {{- toYaml .Values.keeper.persistence.accessModes | nindent 12 }}
+          {{- with .Values.keeper.persistence.storageClassName }}
+          storageClassName: {{ . | quote }}
+          {{- end }}
+          resources:
+            requests:
+              storage: {{ .Values.keeper.persistence.size | quote }}
+{{- end }}

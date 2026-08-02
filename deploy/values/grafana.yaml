@@ -12,13 +12,13 @@
 #   admin login still available: admin / demo-grafana-admin
 #
 # ClickHouse connection used below MUST match deploy/values/clickhouse.yaml's
-# `auth.username`/`auth.password` (documented there too):
-#   host: clickhouse (the Helm release name from `helm install clickhouse ...`)
+# defaultUser password and the pinned client Service name:
+#   host: clickhouse (cluster.clickhouse.service.name in deploy/values/clickhouse.yaml)
 #   port: 8123 (HTTP interface — same interface rotel's exporter writes through)
 #   username: default
 #   password: demo-clickhouse-pw
 #   database: otel / table: otel_traces (rotel's default database + table-prefix,
-#     schema created by the clickhouse-ddl Job in deploy/base/rotel.yaml)
+#     schema created by the chart's rotel-ddl Job)
 #
 # This whole file (datasource jsonData, dashboard panels/queries) was verified
 # against a real cluster: `helm install`ed for real, a real span pushed through
@@ -370,7 +370,7 @@ dashboards:
               "id": 6,
               "type": "timeseries",
               "title": "ClickHouse — query & insert activity",
-              "description": "From ClickHouse's built-in Prometheus endpoint (clickhouse:8001). Insert activity here is the trace pipeline's write side.",
+              "description": "From ClickHouse's built-in Prometheus endpoint (clickhouse:9363). Insert activity here is the trace pipeline's write side.",
               "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
               "datasource": { "type": "prometheus", "uid": "victoriametrics" },
               "targets": [

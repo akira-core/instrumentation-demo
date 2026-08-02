@@ -8,9 +8,10 @@
 #
 # Metrics arrive two ways, because the ecosystem speaks two protocols:
 #
-#   OTLP push      rotel forwards the backend's OTel metrics AND its own internal
-#                  telemetry to /opentelemetry/v1/metrics (protobuf, no extra flags
-#                  needed on this side). See deploy/base/rotel.yaml.
+#   OTLP push      rotel (deployed by charts/clickhouse) forwards the backend's
+#                  OTel metrics AND its own internal telemetry to
+#                  /opentelemetry/v1/metrics (protobuf, no extra flags needed on
+#                  this side). See deploy/values/clickhouse.yaml → cluster.rotel.
 #
 #   Prometheus     the components below only ever expose /metrics, so VictoriaMetrics
 #   scraping       scrapes them itself. The chart has built-in scraping, so no separate
@@ -72,11 +73,12 @@ server:
           static_configs:
             - targets: ["nats:7777"]
 
-        # ClickHouse's built-in Prometheus endpoint (metrics.enabled in
-        # deploy/values/clickhouse.yaml exposes container/service port 8001).
+        # ClickHouse's built-in Prometheus endpoint (official image / Altinity
+        # CHI client Service exposes metrics on 9363 — see serviceTemplate in
+        # charts/clickhouse and deploy/values/clickhouse.yaml).
         - job_name: clickhouse
           static_configs:
-            - targets: ["clickhouse:8001"]
+            - targets: ["clickhouse:9363"]
 
         # Grafana serves /metrics on its normal HTTP port.
         - job_name: grafana

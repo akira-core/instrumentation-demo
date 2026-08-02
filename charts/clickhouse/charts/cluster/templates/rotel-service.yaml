@@ -1,0 +1,28 @@
+{{- if .Values.rotel.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cluster.rotelName" . }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel
+  {{- /* Chart-owned keys are the merge destination, so they win a collision
+         with rotel.service.annotations. */}}
+  {{- $svcAnnotations := merge (include "cluster.argocdAnnotations" "rotel" | fromYaml) (.Values.rotel.service.annotations | default dict) }}
+  annotations:
+    {{- toYaml $svcAnnotations | nindent 4 }}
+spec:
+  type: {{ .Values.rotel.service.type }}
+  selector:
+    {{- include "cluster.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+{{- end }}
