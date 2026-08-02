@@ -262,6 +262,232 @@ dashboards:
             }
           ]
         }
+    # Browse every distinct TraceId that has at least one span in the dashboard
+    # time range. Click a TraceId to open the Trace Propagation Demo dashboard
+    # with that ID pre-filled. Time macros $__fromTime / $__toTime are provided
+    # by the grafana-clickhouse-datasource plugin from the dashboard picker.
+    traces-list:
+      json: |
+        {
+          "title": "Traces List",
+          "uid": "traces-list",
+          "tags": ["demo", "traces"],
+          "schemaVersion": 39,
+          "version": 1,
+          "editable": true,
+          "timezone": "browser",
+          "refresh": "30s",
+          "time": { "from": "now-1h", "to": "now" },
+          "panels": [
+            {
+              "id": 1,
+              "type": "stat",
+              "title": "Traces in range",
+              "description": "Count of distinct TraceIds that have at least one span whose Timestamp falls in the selected dashboard time range.",
+              "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "blue", "value": null },
+                      { "color": "green", "value": 1 }
+                    ]
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "colorMode": "value",
+                "graphMode": "none",
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+                  "pluginVersion": "",
+                  "editorType": "sql",
+                  "format": 1,
+                  "rawSql": "SELECT count(DISTINCT TraceId) AS Traces FROM otel.otel_traces WHERE Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+                }
+              ]
+            },
+            {
+              "id": 2,
+              "type": "stat",
+              "title": "Spans in range",
+              "description": "Total span rows whose Timestamp is in the selected time range (not de-duplicated by TraceId).",
+              "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "blue", "value": null },
+                      { "color": "green", "value": 1 }
+                    ]
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "colorMode": "value",
+                "graphMode": "none",
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+                  "pluginVersion": "",
+                  "editorType": "sql",
+                  "format": 1,
+                  "rawSql": "SELECT count() AS Spans FROM otel.otel_traces WHERE Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+                }
+              ]
+            },
+            {
+              "id": 3,
+              "type": "stat",
+              "title": "Error spans",
+              "description": "Spans with StatusCode Error / STATUS_CODE_ERROR in the selected time range.",
+              "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "green", "value": null },
+                      { "color": "red", "value": 1 }
+                    ]
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "colorMode": "value",
+                "graphMode": "none",
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+                  "pluginVersion": "",
+                  "editorType": "sql",
+                  "format": 1,
+                  "rawSql": "SELECT countIf(StatusCode IN ('Error', 'STATUS_CODE_ERROR')) AS ErrorSpans FROM otel.otel_traces WHERE Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+                }
+              ]
+            },
+            {
+              "id": 4,
+              "type": "stat",
+              "title": "Services",
+              "description": "Distinct ServiceName values seen on spans in the selected time range.",
+              "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+              "fieldConfig": {
+                "defaults": {
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [{ "color": "blue", "value": null }]
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "colorMode": "value",
+                "graphMode": "none",
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+                  "pluginVersion": "",
+                  "editorType": "sql",
+                  "format": 1,
+                  "rawSql": "SELECT uniqExact(ServiceName) AS Services FROM otel.otel_traces WHERE Timestamp >= $__fromTime AND Timestamp <= $__toTime"
+                }
+              ]
+            },
+            {
+              "id": 5,
+              "type": "table",
+              "title": "Traces in time range",
+              "description": "One row per TraceId that has spans in the dashboard time range. Click a TraceId to open the Trace Propagation Demo waterfall for that ID. Root span is the span with an empty / all-zero ParentSpanId when present; NATS consumer traces are separate roots by design (span links).",
+              "gridPos": { "h": 18, "w": 24, "x": 0, "y": 4 },
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+              "options": {
+                "showHeader": true,
+                "cellHeight": "sm",
+                "sortBy": [{ "displayName": "StartTime", "desc": true }]
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }
+                },
+                "overrides": [
+                  {
+                    "matcher": { "id": "byName", "options": "TraceId" },
+                    "properties": [
+                      {
+                        "id": "links",
+                        "value": [
+                          {
+                            "title": "Open in Trace Propagation Demo",
+                            "url": "/d/trace-propagation-demo?var-trace_id=${__value.raw}&${__url_time_range}",
+                            "targetBlank": false
+                          }
+                        ]
+                      },
+                      { "id": "custom.width", "value": 320 }
+                    ]
+                  },
+                  {
+                    "matcher": { "id": "byName", "options": "DurationMs" },
+                    "properties": [{ "id": "unit", "value": "ms" }]
+                  },
+                  {
+                    "matcher": { "id": "byName", "options": "ErrorSpans" },
+                    "properties": [
+                      {
+                        "id": "thresholds",
+                        "value": {
+                          "mode": "absolute",
+                          "steps": [
+                            { "color": "transparent", "value": null },
+                            { "color": "red", "value": 1 }
+                          ]
+                        }
+                      },
+                      { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+                    ]
+                  }
+                ]
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
+                  "pluginVersion": "",
+                  "editorType": "sql",
+                  "format": 1,
+                  "rawSql": "SELECT TraceId, min(Timestamp) AS StartTime, max(Timestamp) AS LastSpanTime, max(Duration) / 1000000 AS DurationMs, count() AS SpanCount, countIf(StatusCode IN ('Error', 'STATUS_CODE_ERROR')) AS ErrorSpans, arrayStringConcat(arraySort(groupUniqArray(ServiceName)), ', ') AS Services, anyIf(SpanName, ParentSpanId = '' OR ParentSpanId = '0000000000000000') AS RootSpan FROM otel.otel_traces WHERE Timestamp >= $__fromTime AND Timestamp <= $__toTime GROUP BY TraceId ORDER BY StartTime DESC LIMIT 500"
+                }
+              ]
+            }
+          ]
+        }
     ecosystem-metrics:
       json: |
         {
