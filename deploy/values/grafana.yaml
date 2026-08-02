@@ -8,7 +8,8 @@
 #
 # Access (default ClusterIP service, no Ingress):
 #   kubectl port-forward -n demo svc/grafana 3000:3000
-#   open http://localhost:3000  (login: admin / demo-grafana-admin, see below)
+#   open http://localhost:3000  — anonymous Viewer (no login for dashboards)
+#   admin login still available: admin / demo-grafana-admin
 #
 # ClickHouse connection used below MUST match deploy/values/clickhouse.yaml's
 # `auth.username`/`auth.password` (documented there too):
@@ -45,8 +46,24 @@
 
 adminUser: admin
 # Plaintext demo credential, intentional for an ephemeral local `kind` cluster —
-# not meant for anything resembling production use.
+# not meant for anything resembling production use. Prefer anonymous access for
+# day-to-day dashboard viewing; keep admin for edits/admin UI only.
 adminPassword: "demo-grafana-admin"
+
+# Local demo: open dashboards without a login prompt. Anonymous users get
+# Viewer (read-only). Admin can still sign in for provisioning/edits.
+# ref: https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/anonymous-auth/
+grafana.ini:
+  auth.anonymous:
+    enabled: true
+    org_name: Main Org.
+    org_role: Viewer
+    hide_version: true
+  auth:
+    # Skip the login page when opening Grafana; dashboards load immediately.
+    disable_login_form: false
+  users:
+    viewers_can_edit: false
 
 service:
   type: ClusterIP

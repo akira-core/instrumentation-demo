@@ -185,15 +185,29 @@ git submodule update --remote third_party/<repo>
 Requires `docker`, `kind`, `helm`, and `kubectl` locally.
 
 ```sh
-make deploy      # reuse kind cluster if it already exists (never recreates it),
+make deploy      # use current kubectl context (or auto-pick a kind cluster),
                   # build+load images, install/upgrade charts, apply services
-make port-forward  # wait until Ready, then open all local ports (Ctrl-C to stop)
+make port-forward  # use current kubectl context; wait Ready, open local ports
 # alias: make pf
 ```
 
-`make deploy` is safe to re-run: if kind cluster `demo-trace` already exists it
-is **reused** (not deleted/recreated); Helm upgrades in place and manifests are
-re-applied. Only `make teardown` removes the cluster.
+Cluster name is **not hard-coded**. Day-to-day targets use the current kubectl
+context (Docker Desktop, an existing kind context, etc.). To pin a kind cluster:
+
+```sh
+make deploy CLUSTER_NAME=my-kind
+make port-forward CLUSTER_NAME=my-kind
+make teardown CLUSTER_NAME=my-kind
+```
+
+When `CLUSTER_NAME` is unset: use the current `kind-*` context name, else the
+sole kind cluster if exactly one exists, else create `demo-trace`. If kubectl
+already points at a reachable non-kind cluster (e.g. Docker Desktop), kind
+create/load is skipped and helm/apply run against that cluster.
+
+`make deploy` is safe to re-run: existing clusters are **reused** (not
+recreated); Helm upgrades in place and manifests are re-applied. `make teardown`
+only deletes a kind cluster — never Docker Desktop or other contexts.
 
 ### Accessing the demo
 
