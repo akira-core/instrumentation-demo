@@ -1,0 +1,7 @@
+{
+  "name": "instrumentation-demo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Demo: W3C trace propagation from a JS frontend through a Go backend over NATS, with a Kubernetes-native feature-flag relay proxy.",
+  "license": "Apache-2.0"
+}

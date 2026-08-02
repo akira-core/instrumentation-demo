@@ -1,0 +1,28 @@
+Chart: clickhouse
+Repository name: bitnami
+Repository URL: https://charts.bitnami.com/bitnami
+Chart version: 9.4.4
+App version: 25.7.5
+Upstream source: https://github.com/bitnami/charts (bitnami/clickhouse)
+
+Vendored via:
+  helm repo add bitnami https://charts.bitnami.com/bitnami
+  helm repo update bitnami
+  helm pull bitnami/clickhouse --version 9.4.4 --untar -d charts
+
+Pulled on: 2026-08-02 (UTC)
+
+NOTE on container image: the chart's default `image.repository` (bitnami/clickhouse)
+now resolves to Broadcom's paid "Bitnami Secure Images" registry and the tag
+pulled here (25.7.5-debian-12-r0) does not exist under `docker.io/bitnami/clickhouse`
+(verified with `docker pull` -> "not found"). The free/community mirror lives under
+`docker.io/bitnamilegacy/clickhouse` (same tag, confirmed pullable). deploy/values/clickhouse.yaml
+overrides image.registry/image.repository to bitnamilegacy and sets
+global.security.allowInsecureImages: true (bitnamilegacy images aren't signed the way
+the chart's built-in image verification expects). This is a known, widely-hit Bitnami
+distribution change (Aug 2025) and not specific to this chart/version pull.
+
+Do not hand-edit files under this directory except SOURCE.txt itself; to
+upgrade, re-run `helm pull bitnami/clickhouse --version <new> --untar -d charts` and
+update this file accordingly. Local customization belongs in deploy/values/clickhouse.yaml,
+not in this vendored chart.

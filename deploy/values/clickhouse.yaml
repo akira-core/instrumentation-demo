@@ -1,0 +1,62 @@
+# Local-demo values for the vendored bitnami/clickhouse chart (charts/clickhouse,
+# see charts/clickhouse/SOURCE.txt). Single node/shard, modest storage for `kind`,
+# simplified auth. Install with:
+#
+#   helm install clickhouse charts/clickhouse -f deploy/values/clickhouse.yaml -n demo
+#
+# Credentials (documented explicitly per task 6.2 — deploy/base/rotel.yaml's
+# ClickHouse exporter env vars are hard-coded to match these same literal values):
+#   username: default
+#   password: demo-clickhouse-pw
+#   database: otel (rotel's default database/table-prefix, created by the
+#     clickhouse-ddl schema-init Job in deploy/base/rotel.yaml)
+# This is a plaintext demo credential intentionally — fine for an ephemeral
+# `kind` cluster, not meant for anything resembling production use.
+
+## The chart's default `image.repository` (bitnami/clickhouse) now points at
+## Broadcom's paid "Bitnami Secure Images" registry; the tag this chart version
+## ships (25.7.5-debian-12-r0) does not exist there (confirmed via `docker pull`).
+## The free/community mirror is `bitnamilegacy/clickhouse`, confirmed pullable.
+## See charts/clickhouse/SOURCE.txt for details.
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: docker.io
+  repository: bitnamilegacy/clickhouse
+  tag: 25.7.5-debian-12-r0
+
+## Single node, single shard — no replication needed for a demo, so ClickHouse
+## Keeper (used for replicated-table coordination) is unnecessary.
+shards: 1
+replicaCount: 1
+keeper:
+  enabled: false
+
+auth:
+  username: default
+  password: "demo-clickhouse-pw"
+
+persistence:
+  enabled: true
+  size: 4Gi
+
+## Built-in Prometheus endpoint, scraped by VictoriaMetrics at clickhouse:8001
+## (see deploy/values/victoria-metrics.yaml). Off by chart default.
+metrics:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+## Chart defaults already enable readiness/liveness probes (see values.yaml
+## livenessProbe.enabled / readinessProbe.enabled) — left untouched here.
+
+service:
+  type: ClusterIP

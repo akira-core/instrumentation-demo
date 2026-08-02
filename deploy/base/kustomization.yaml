@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# In-house services only (frontend, backend, rotel) plus the feature-flags
+# ConfigMap the relay proxy reads. NATS, ClickHouse, Grafana, and the GOFF relay
+# proxy are installed separately via their vendored Helm charts under charts/
+# (the relay proxy's ServiceAccount/Role/RoleBinding ship with its chart via
+# extraManifests, not from here) — see `make deploy` / README.md.
+resources:
+  - namespace.yaml
+  - feature-flags-configmap.yaml
+  - backend.yaml
+  - frontend.yaml
+  - rotel.yaml

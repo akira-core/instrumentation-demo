@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/part-of: demo-trace-propagation-stack
+    spec:
+      containers:
+        - name: backend
+          image: demo-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            # GOFF relay proxy (Helm release "relay-proxy", chart default port 1031).
+            - name: RELAY_PROXY_URL
+              value: "http://relay-proxy:1031"
+            - name: NATS_URL
+              value: "nats://nats:4222"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://rotel:4318"
+            - name: OTEL_SERVICE_NAME
+              value: "demo-backend"
+            - name: CORS_ALLOWED_ORIGIN
+              value: "*"
+            # Env-only kill switch for the instrumentation modules. It has no
+            # relay counterpart: while it is off, otelnats runs no OpenFeature
+            # evaluation at all and no relay value can enable tracing. It must
+            # be truthy for the otel-nats-tracing flag to have any effect.
+            - name: OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+              value: "1"
+            # Fallback default for the otel-nats-tracing flag, used whenever the
+            # relay proxy has no usable opinion (unreachable, still starting, or
+            # flag undefined). Matches the ConfigMap's defaultRule so behavior is
+            # the same either way; the relay is what makes it changeable at
+            # runtime.
+            - name: OTEL_NATS_TRACING_ENABLED
+              value: "1"
+          # NATS connects asynchronously with retry/backoff (task 2.7), and
+          # /healthz never blocks on it — so readiness/liveness can both key
+          # off /healthz without fighting the dependency-ordering tolerance
+          # requirement (backend must not crash-loop while NATS is still
+          # starting).
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

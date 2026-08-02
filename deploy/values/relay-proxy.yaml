@@ -1,0 +1,104 @@
+# Local-demo values for the vendored GO Feature Flag relay proxy chart
+# (charts/relay-proxy, see charts/relay-proxy/SOURCE.txt). Install with:
+#
+#   helm install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n demo
+#
+# The release name MUST be "relay-proxy": the chart's fullname template collapses
+# to the release name when it contains the chart name, so this is what makes the
+# in-cluster Service resolve at http://relay-proxy:1031 — the endpoint the backend's
+# OpenFeature provider is configured with (see backend manifest RELAY_PROXY_URL).
+#
+# Flags are NOT defined here. They live in the demo-feature-flags ConfigMap
+# (deploy/base/feature-flags-configmap.yaml) and are read through GOFF's native
+# Kubernetes ConfigMap retriever below — this is the "relay proxy reads the k8s
+# config" requirement, and it is why this component needs RBAC at all.
+
+relayproxy:
+  config: |
+    server:
+      mode: http
+      port: 1031
+      # Separate monitoring port, scraped by VictoriaMetrics at relay-proxy:1032
+      # (see deploy/values/victoria-metrics.yaml). Setting this also moves the
+      # chart's liveness/readiness probes onto this port — see the chart README —
+      # so the pod's readiness now depends on it being served correctly.
+      monitoringPort: 1032
+
+    # How often GOFF re-reads the ConfigMap, in ms. Deliberately short (1s) so a
+    # `kubectl edit configmap demo-feature-flags` shows up on the next demo
+    # request rather than a minute later. Combined with the backend provider's
+    # DisableCache, an operator sees flag changes take effect essentially live.
+    pollingInterval: 1000
+
+    # Start even if the ConfigMap isn't readable yet, rather than crash-looping.
+    # `kubectl apply -k deploy/base` (which creates the ConfigMap) and
+    # `helm install` run independently, so either order must work — see the
+    # kind-cluster-deployment spec's dependency-ordering requirement. While the
+    # retriever has nothing, evaluations return the caller's default, which is
+    # exactly the documented env-var fallback path for otelnats.
+    startWithRetrieverError: true
+
+    logLevel: info
+
+    # GOFF's native Kubernetes retriever: reads flag definitions straight from
+    # the cluster's own API server. Only works in-cluster (upstream limitation),
+    # which is fine — the whole demo is kind-scoped.
+    retriever:
+      kind: configmap
+      namespace: demo
+      configmap: demo-feature-flags
+      key: flags.yaml
+
+    # Evaluation results are logged rather than shipped anywhere — this is a
+    # local demo, and no flag-analytics backend exists in the stack.
+    exporter:
+      kind: log
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 1031
+
+# Modest for a single-node kind cluster (the chart's default requests 500m CPU,
+# which competes with ClickHouse/Grafana on one node).
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+
+# Least-privilege RBAC for the ConfigMap retriever above: read-only, this
+# namespace only, and restricted by resourceNames to the single ConfigMap holding
+# the flags — never a ClusterRole. The chart evaluates extraManifests as a
+# template, so the ServiceAccount name is taken from the chart's own helper
+# rather than hardcoded, and stays correct if the release is ever renamed.
+extraManifests:
+  - kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
+      namespace: "{{ .Release.Namespace }}"
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        resourceNames: ["demo-feature-flags"]
+        verbs: ["get", "list", "watch"]
+  - kind: RoleBinding
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
+      namespace: "{{ .Release.Namespace }}"
+    subjects:
+      - kind: ServiceAccount
+        name: '{{ include "relay-proxy.serviceAccountName" . }}'
+        namespace: "{{ .Release.Namespace }}"
+    roleRef:
+      kind: Role
+      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
+      apiGroup: rbac.authorization.k8s.io

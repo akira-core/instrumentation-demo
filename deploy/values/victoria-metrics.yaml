@@ -1,0 +1,95 @@
+# Local-demo values for the vendored VictoriaMetrics single-node chart
+# (charts/victoria-metrics, see charts/victoria-metrics/SOURCE.txt). Install with:
+#
+#   helm install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n demo
+#
+# The release name MUST be "victoria-metrics": rotel's OTLP metrics exporter and
+# Grafana's provisioned data source both address it as http://victoria-metrics:8428.
+#
+# Metrics arrive two ways, because the ecosystem speaks two protocols:
+#
+#   OTLP push      rotel forwards the backend's OTel metrics AND its own internal
+#                  telemetry to /opentelemetry/v1/metrics (protobuf, no extra flags
+#                  needed on this side). See deploy/base/rotel.yaml.
+#
+#   Prometheus     the components below only ever expose /metrics, so VictoriaMetrics
+#   scraping       scrapes them itself. The chart has built-in scraping, so no separate
+#                  vmagent deployment is needed for a stack this size.
+
+server:
+  # Without this the chart's fullname template produces the Service name
+  # "victoria-metrics-victoria-metrics-single-server" (release name + chart
+  # name), which nothing else in the stack addresses. rotel's OTLP metrics
+  # exporter and Grafana's data source both use http://victoria-metrics:8428, so
+  # pin the name to match rather than spreading the long form through both.
+  fullnameOverride: victoria-metrics
+
+  extraArgs:
+    # OTLP metrics arrive with OTel-style dotted names (http.server.request.duration,
+    # go.goroutine.count). Stored verbatim they need quoted-label-name syntax to
+    # query and look nothing like the scraped Prometheus metrics sitting beside
+    # them. This flag converts them to conventional Prometheus naming
+    # (http_server_request_duration_seconds, ...) so both ingestion paths produce
+    # one consistent namespace and ordinary PromQL works.
+    opentelemetry.usePrometheusNaming: "true"
+
+  # 1 day. Short on purpose: this is an ephemeral kind cluster, not a metrics
+  # archive, and a load test can produce a lot of samples quickly.
+  retentionPeriod: 1d
+
+  persistentVolume:
+    enabled: true
+    size: 4Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+  service:
+    type: ClusterIP
+
+  scrape:
+    enabled: true
+    config:
+      global:
+        scrape_interval: 15s
+
+      scrape_configs:
+        # VictoriaMetrics' own metrics — cheap, and the first thing to check when
+        # ingestion looks wrong.
+        - job_name: victoriametrics
+          static_configs:
+            - targets: ["localhost:8428"]
+
+        # NATS, via the chart's prometheus-nats-exporter sidecar (enabled in
+        # deploy/values/nats.yaml, which also needs config.monitor on — the
+        # exporter reads the monitoring port, it does not instrument NATS itself).
+        - job_name: nats
+          static_configs:
+            - targets: ["nats:7777"]
+
+        # ClickHouse's built-in Prometheus endpoint (metrics.enabled in
+        # deploy/values/clickhouse.yaml exposes container/service port 8001).
+        - job_name: clickhouse
+          static_configs:
+            - targets: ["clickhouse:8001"]
+
+        # Grafana serves /metrics on its normal HTTP port.
+        - job_name: grafana
+          static_configs:
+            - targets: ["grafana:3000"]
+
+        # GOFF relay proxy's monitoring port (set via its config in
+        # deploy/values/relay-proxy.yaml).
+        - job_name: relay-proxy
+          static_configs:
+            - targets: ["relay-proxy:1032"]
+
+        # NOTE: rotel is deliberately absent. It exposes no Prometheus scrape
+        # endpoint at all; its internal telemetry reaches this store by being
+        # pushed over OTLP instead (ROTEL_EXPORTERS_INTERNAL_METRICS=vm). Adding a
+        # scrape job for it here would just produce a permanently-down target.

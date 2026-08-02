@@ -1,0 +1,19 @@
+Chart: grafana
+Repository name: grafana
+Repository URL: https://grafana.github.io/helm-charts
+Chart version: 10.5.15
+App version: 12.3.1
+Upstream source: https://github.com/grafana/helm-charts (charts/grafana)
+
+Vendored via:
+  helm repo add grafana https://grafana.github.io/helm-charts
+  helm repo update grafana
+  helm pull grafana/grafana --version 10.5.15 --untar -d charts
+
+Pulled on: 2026-08-02 (UTC)
+
+Do not hand-edit files under this directory except SOURCE.txt itself; to
+upgrade, re-run `helm pull grafana/grafana --version <new> --untar -d charts` with a new
+--version and update this file accordingly. Local customization (datasource +
+dashboard provisioning, plugins list, service config) belongs in
+deploy/values/grafana.yaml, not in this vendored chart.

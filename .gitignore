@@ -1,0 +1,30 @@
+# Dependencies (restored with `pnpm install`)
+node_modules/
+
+# Frontend build output (produced by `pnpm run build` / the Dockerfile)
+dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Local env overrides — .env.example is committed, real .env files are not
+.env
+.env.local
+.env.*.local
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+
+# Logs
+*.log
