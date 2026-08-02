@@ -11,10 +11,10 @@
 
 - [x] 2.1 Scaffold Go module `backend/` with HTTP server, OTLP HTTP exporter setup, and W3C propagator configured
 - [x] 2.2 Implement `POST /api/demo-trace` handler: extract incoming `traceparent`/`tracestate` (or start a root trace if absent), start a SERVER span
-- [x] 2.3 ~~Implement relay-proxy client call (`GET /evaluate/demo-nats-flow`) as a CLIENT span~~ — **superseded by 3.4/3.5**: the bespoke HTTP client is replaced by an OpenFeature evaluation against the GOFF relay proxy (design.md Decision 5)
+- [x] 2.3 ~~Implement relay-proxy client call (`GET /evaluate/demo-nats-flow`) as a CLIENT span~~ — **superseded by 3.4/3.5**, then **superseded by section 9**: no application-level flag evaluation on the request path
 - [x] 2.4 ~~Wire `otelnats.ConnectWithOptions(..., WithTracingEnabled(true))`~~ — **superseded by 3.6**: that option makes the connection fully static and blocks every relay-driven flag change, defeating the demo's headline feature. Publishing to `demo.trace.request` with the active context is unchanged.
 - [x] 2.5 Implement in-process subscriber on `demo.trace.request` (CONSUMER span via `otelnats.Subscribe`) that does trivial work and publishes a reply on `demo.trace.reply`
-- [x] 2.6 Wire the original handler to await the reply, close its SERVER span, and return `{traceId, spanId}` JSON
+- [x] 2.6 Wire the original handler to await the reply, close its SERVER span, and return `{traceId, spanId}` JSON (app-flag fields were added later; **section 9 restores** the minimal contract)
 - [x] 2.7 Add retry/backoff for the initial NATS connection so the backend doesn't crash-loop if NATS isn't ready yet
 - [x] 2.8 Add a `/healthz` endpoint for k8s readiness/liveness probes
 - [x] 2.9 Write a Dockerfile for the backend image, using repo root as build context so it can `COPY third_party/instrumentation-go/otel-nats`
@@ -33,9 +33,9 @@
 - [x] 3.4 Delete the `relay-proxy/` Go module and drop it from `go.work`; remove its image build from the Makefile and its `deploy/base/relay-proxy.yaml` manifest
 - [x] 3.5 Vendor the official GOFF relay-proxy Helm chart into `charts/relay-proxy` (`helm repo add go-feature-flag https://charts.gofeatureflag.org/ && helm pull go-feature-flag/relay-proxy --untar -d charts/`), stamping `charts/relay-proxy/SOURCE.txt` with repo + exact chart version
 - [x] 3.6 Write `deploy/values/relay-proxy.yaml` configuring GOFF's Kubernetes ConfigMap retriever (`kind: configmap`, `namespace: demo`, `configmap: demo-feature-flags`, `key: flags.yaml`), a short `pollingInterval` so `kubectl edit` shows up quickly, and modest `kind`-sized resources
-- [x] 3.7 Rewrite the `demo-feature-flags` ConfigMap (`deploy/base/feature-flags-configmap.yaml`) from the old custom JSON into GOFF's flag format under a `flags.yaml` key, defining both `otel-nats-tracing` (library-consumed) and `demo-nats-flow` (application-consumed), each with `variations` + a `defaultRule`
+- [x] 3.7 Rewrite the `demo-feature-flags` ConfigMap (`deploy/base/feature-flags-configmap.yaml`) from the old custom JSON into GOFF's flag format under a `flags.yaml` key (initially both `otel-nats-tracing` and `demo-nats-flow`; **section 9 removes the app flag** so only library flags remain)
 - [x] 3.8 Replace the relay-proxy ServiceAccount/Role/RoleBinding with ones bound to the GOFF chart's ServiceAccount, scoped to `get`/`list`/`watch` on the single `demo-feature-flags` ConfigMap in the `demo` namespace
-- [x] 3.9 Backend: register the OpenFeature GOFF provider at startup — `gofeatureflag.NewProvider(ProviderOptions{Endpoint: "http://relay-proxy:1031", EvaluationType: REMOTE, DisableCache: true, HTTPClient: <otelhttp-instrumented>})` + `openfeature.SetProviderAndWait` — remove `otelnats.WithTracingEnabled(true)` from the NATS connect call, delete `internal/relayclient`, evaluate `demo-nats-flow` through the OpenFeature client, and set `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1` + `OTEL_NATS_TRACING_ENABLED=1` in the backend manifest (the env-only kill switch must be on for any relay value to apply, and the env var is the fallback default)
+- [x] 3.9 Backend: register the OpenFeature GOFF provider at startup — `gofeatureflag.NewProvider(...)` + `openfeature.SetProviderAndWait` — remove `otelnats.WithTracingEnabled(true)` from the NATS connect call, delete `internal/relayclient`, and set `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1` + `OTEL_NATS_TRACING_ENABLED=1` in the backend manifest. (**Section 9 removes** per-request evaluation of `demo-nats-flow`; provider install remains for library resolution.)
 
 ## 4. Frontend (JS)
 
@@ -75,8 +75,24 @@
 ## 8. End-to-end verification
 
 - [x] 8.1 Bring up the full stack in `kind` and manually trigger the frontend demo flow
-- [x] 8.2 Verify the trace ID returned to the frontend resolves in Grafana to a trace containing the frontend, backend HTTP, and flag-evaluation spans plus the NATS producer span, and that the span-linked NATS `process` spans are discoverable from it (design.md Decision 4 — they are separate root traces by design, so a single-trace-ID query alone must NOT be treated as the pass criterion)
-- [x] 8.3 Verify editing `demo-nats-flow` in the `demo-feature-flags` ConfigMap changes the backend's `natsFlowExecuted` result on the next request, with neither the relay proxy nor the backend restarted
-- [x] 8.4 Verify flipping `otel-nats-tracing` to disabled in the same ConfigMap stops NATS spans being emitted (and re-enabling restores them) with no backend restart — the headline dynamic-instrumentation capability of the `feat/inprogress-openfeature` branch
-- [x] 8.5 Verify the backend tolerates being deployed before NATS and before the relay proxy are ready (no crash-loop), and that with the relay unreachable it falls back to its env-var defaults rather than erroring
+- [x] 8.2 Verify the trace ID returned to the frontend resolves in Grafana to a trace containing the frontend, backend HTTP, and NATS producer span (and historically flag-evaluation when app flags existed), and that the span-linked NATS `process` spans are discoverable from it (design.md Decision 4 — they are separate root traces by design, so a single-trace-ID query alone must NOT be treated as the pass criterion)
+- [x] 8.3 ~~Verify editing `demo-nats-flow`…~~ — **superseded by section 9 / 9.6**: application flag verification removed; only library-flag verification remains
+- [x] 8.4 Verify flipping `otel-nats-tracing` to disabled in the ConfigMap stops NATS spans being emitted while the NATS round trip still completes (and re-enabling restores spans) with no backend restart — the headline dynamic-instrumentation capability
+- [x] 8.5 Verify the backend tolerates being deployed before NATS and before the relay proxy are ready (no crash-loop), and that with the relay unreachable instrumentation falls back to env-var defaults rather than erroring
 - [x] 8.6 Run `openspec validate --strict` against this change and fix any reported issues
+
+## 9. Library-only feature flags (remove app-side flag path)
+
+> Scope refinement merged from the former `remove-app-feature-flags` change: the demo
+> only needs to prove `instrumentation-go` / `instrumentation-js` library flags work.
+> Application-level `demo-nats-flow` and related API/UI verification are removed.
+
+- [x] 9.1 Backend: remove per-request evaluation of `demo-nats-flow`; always run the NATS round trip on a successful demo request when NATS is reachable
+- [x] 9.2 Backend: slim `POST /api/demo-trace` success JSON to `{traceId, spanId}` only (drop `flagEnabled`, `natsFlowExecuted` and related span attributes)
+- [x] 9.3 Backend: keep OpenFeature + GOFF provider setup for library resolution; remove app-only evaluation API from `internal/featureflags` if nothing else needs it; ensure NATS connect still does **not** use `WithTracingEnabled(...)`
+- [x] 9.4 Backend tests: rewrite unit/integration tests that asserted app-flag skip/execute; keep coverage for library-flag behavior (NATS path still runs when tracing is disabled via in-memory/provider setup as applicable)
+- [x] 9.5 Frontend: drop UI pills / type fields for `flagEnabled` and `natsFlowExecuted`; keep `traceId` display and Grafana link
+- [x] 9.6 Deploy: remove `demo-nats-flow` from `deploy/base/feature-flags-configmap.yaml`; leave `otel-nats-tracing` (and comments that it is library-consumed only)
+- [x] 9.7 Docs: update `README.md` and `README.zh-TW.md` — architecture, flag tables, and verification steps document **only** library-flag proof (flip `otel-nats-tracing` → spans on/off, business path still runs)
+- [x] 9.8 Grafana: update any dashboard panel description that claims per-request `demo-nats-flow` evaluation
+- [x] 9.9 Re-verify: happy path + live toggle of `otel-nats-tracing` only; run backend tests and `openspec validate --strict` for this change

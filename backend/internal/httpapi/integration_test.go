@@ -14,7 +14,6 @@ import (
 	"github.com/open-feature/go-sdk/openfeature/memprovider"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/akira-core/instrumentation-demo/backend/internal/featureflags"
 	"github.com/akira-core/instrumentation-demo/backend/internal/natsflow"
 )
 
@@ -55,14 +54,25 @@ func startNATS(t *testing.T) *natsflow.Manager {
 	return nm
 }
 
-// setRelayFlags installs an in-memory provider serving both the application
-// flag and otelnats's own tracing flag, standing in for the GOFF relay proxy.
-func setRelayFlags(t *testing.T, demoFlow, natsTracing bool) {
+func boolFlag(v bool) memprovider.InMemoryFlag {
+	variant := "off"
+	if v {
+		variant = "on"
+	}
+	return memprovider.InMemoryFlag{
+		State:          memprovider.Enabled,
+		DefaultVariant: variant,
+		Variants:       map[string]any{"on": true, "off": false},
+	}
+}
+
+// setLibraryTracingFlag installs an in-memory provider serving otelnats's
+// otel-nats-tracing flag, standing in for the GOFF relay proxy.
+func setLibraryTracingFlag(t *testing.T, natsTracing bool) {
 	t.Helper()
 	if err := openfeature.SetProviderAndWait(memprovider.NewInMemoryProvider(
 		map[string]memprovider.InMemoryFlag{
-			demoNatsFlowFlagKey: boolFlag(demoFlow),
-			flagKeyNATSTracing:  boolFlag(natsTracing),
+			flagKeyNATSTracing: boolFlag(natsTracing),
 		},
 	)); err != nil {
 		t.Fatalf("install in-memory provider: %v", err)
@@ -96,37 +106,33 @@ func postDemoTrace(t *testing.T, handler http.HandlerFunc) demoTraceResponse {
 }
 
 // TestDemoTraceHandler_FullNatsRoundTrip exercises the handler against a real
-// (embedded) NATS server with the relay reporting demo-nats-flow enabled,
-// covering the full publish(demo.trace.request)/consume/reply(demo.trace.reply)
-// round trip end to end (task 2.10).
+// (embedded) NATS server, covering the full publish/consume/reply round trip.
 func TestDemoTraceHandler_FullNatsRoundTrip(t *testing.T) {
 	_ = setupGlobalTracing(t)
 	t.Setenv(envGlobalTracingEnabled, "1")
 	t.Setenv(envNATSTracingEnabled, "1")
 
-	setRelayFlags(t, true, true)
+	setLibraryTracingFlag(t, true)
 	t.Cleanup(func() { _ = openfeature.SetProviderAndWait(openfeature.NoopProvider{}) })
 
 	nm := startNATS(t)
-	handler := NewDemoTraceHandler(featureflags.New(), nm, nil)
+	handler := NewDemoTraceHandler(nm, nil)
 
 	got := postDemoTrace(t, handler)
 
-	if !got.FlagEnabled {
-		t.Errorf("flagEnabled = false, want true")
-	}
-	if !got.NatsFlowExecuted {
-		t.Errorf("natsFlowExecuted = false, want true (round trip should have completed)")
-	}
 	if !traceIDPattern.MatchString(got.TraceID) {
 		t.Errorf("traceId = %q, want 32 hex chars", got.TraceID)
+	}
+	if !spanIDPattern.MatchString(got.SpanID) {
+		t.Errorf("spanId = %q, want 16 hex chars", got.SpanID)
 	}
 }
 
 // TestRelayFlagTogglesNatsInstrumentation is the regression test for this
 // demo's headline capability: an operator flipping otel-nats-tracing on the
 // relay proxy turns otelnats's spans on and off in a running process, with no
-// restart and no application code involved in the decision.
+// restart and no application code involved in the decision. The NATS business
+// path still completes in every phase.
 //
 // It is also the guard against silently reintroducing
 // otelnats.WithTracingEnabled(...) in natsflow: that option pins a connection
@@ -147,15 +153,13 @@ func TestRelayFlagTogglesNatsInstrumentation(t *testing.T) {
 	})
 
 	// Phase 1: relay says tracing ON.
-	setRelayFlags(t, true, true)
+	setLibraryTracingFlag(t, true)
 	time.Sleep(relaySnapshotTTL)
 
 	nm := startNATS(t)
-	handler := NewDemoTraceHandler(featureflags.New(), nm, nil)
+	handler := NewDemoTraceHandler(nm, nil)
 
-	if got := postDemoTrace(t, handler); !got.NatsFlowExecuted {
-		t.Fatalf("phase 1: natsFlowExecuted = false, want true")
-	}
+	_ = postDemoTrace(t, handler)
 	tracedOn := countNATSSpans(rec.Ended())
 	if tracedOn == 0 {
 		t.Fatalf("phase 1: no NATS spans emitted while the relay served otel-nats-tracing=enabled; "+
@@ -163,27 +167,23 @@ func TestRelayFlagTogglesNatsInstrumentation(t *testing.T) {
 	}
 
 	// Phase 2: operator flips the flag OFF on the relay. Same process, same
-	// connection, no restart.
-	setRelayFlags(t, true, false)
+	// connection, no restart. Business path must still succeed.
+	setLibraryTracingFlag(t, false)
 	time.Sleep(relaySnapshotTTL)
 
 	before := countNATSSpans(rec.Ended())
-	if got := postDemoTrace(t, handler); !got.NatsFlowExecuted {
-		t.Fatalf("phase 2: natsFlowExecuted = false, want true (the round trip must still run; only its instrumentation is disabled)")
-	}
+	_ = postDemoTrace(t, handler)
 	if after := countNATSSpans(rec.Ended()); after != before {
 		t.Errorf("phase 2: %d new NATS spans emitted after the relay disabled otel-nats-tracing, want 0 — "+
 			"is the connection pinned with otelnats.WithTracingEnabled()?", after-before)
 	}
 
 	// Phase 3: flip it back ON; instrumentation must return.
-	setRelayFlags(t, true, true)
+	setLibraryTracingFlag(t, true)
 	time.Sleep(relaySnapshotTTL)
 
 	before = countNATSSpans(rec.Ended())
-	if got := postDemoTrace(t, handler); !got.NatsFlowExecuted {
-		t.Fatalf("phase 3: natsFlowExecuted = false, want true")
-	}
+	_ = postDemoTrace(t, handler)
 	if after := countNATSSpans(rec.Ended()); after == before {
 		t.Errorf("phase 3: no new NATS spans after re-enabling otel-nats-tracing on the relay, want > 0")
 	}

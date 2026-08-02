@@ -9,8 +9,6 @@ import { getTracer, initTracing } from "./tracing";
 interface DemoTraceResponse {
   readonly traceId: string;
   readonly spanId: string;
-  readonly flagEnabled: boolean;
-  readonly natsFlowExecuted: boolean;
 }
 
 /** Runtime guard for the backend response -- never trust external data. */
@@ -21,9 +19,7 @@ function isDemoTraceResponse(value: unknown): value is DemoTraceResponse {
   const candidate = value as Record<string, unknown>;
   return (
     typeof candidate.traceId === "string" &&
-    typeof candidate.spanId === "string" &&
-    typeof candidate.flagEnabled === "boolean" &&
-    typeof candidate.natsFlowExecuted === "boolean"
+    typeof candidate.spanId === "string"
   );
 }
 
@@ -71,8 +67,8 @@ function renderShell(root: HTMLElement): AppElements {
   description.textContent =
     "Click the button to send a traced request from this browser to the " +
     "demo backend. The W3C traceparent header propagates the trace across " +
-    "the frontend, backend, and (when the feature flag is enabled) the " +
-    "NATS request/reply round trip.";
+    "the frontend, backend, and the NATS request/reply round trip. " +
+    "Library tracing (otel-nats-tracing) can be toggled live via the feature-flag ConfigMap.";
 
   const button = document.createElement("button");
   button.type = "button";
@@ -122,26 +118,6 @@ function renderResult(result: HTMLDivElement, response: DemoTraceResponse): void
   spanIdValue.textContent = response.spanId;
   spanIdRow.append(spanIdLabel, spanIdValue);
 
-  const flagRow = document.createElement("div");
-  flagRow.className = "result-row";
-  const flagLabel = document.createElement("span");
-  flagLabel.className = "result-label";
-  flagLabel.textContent = "demo-nats-flow flag";
-  const flagValue = document.createElement("span");
-  flagValue.className = response.flagEnabled ? "pill pill--on" : "pill pill--off";
-  flagValue.textContent = response.flagEnabled ? "enabled" : "disabled";
-  flagRow.append(flagLabel, flagValue);
-
-  const natsRow = document.createElement("div");
-  natsRow.className = "result-row";
-  const natsLabel = document.createElement("span");
-  natsLabel.className = "result-label";
-  natsLabel.textContent = "NATS round trip";
-  const natsValue = document.createElement("span");
-  natsValue.className = response.natsFlowExecuted ? "pill pill--on" : "pill pill--off";
-  natsValue.textContent = response.natsFlowExecuted ? "executed" : "skipped";
-  natsRow.append(natsLabel, natsValue);
-
   const link = document.createElement("a");
   link.className = "grafana-link";
   link.href = buildGrafanaTraceUrl(response.traceId);
@@ -149,7 +125,7 @@ function renderResult(result: HTMLDivElement, response: DemoTraceResponse): void
   link.rel = "noopener noreferrer";
   link.textContent = "View in Grafana ↗";
 
-  result.append(traceIdRow, spanIdRow, flagRow, natsRow, link);
+  result.append(traceIdRow, spanIdRow, link);
 }
 
 function renderError(result: HTMLDivElement, message: string): void {
@@ -185,8 +161,7 @@ async function handleStartTrace(elements: AppElements): Promise<void> {
       }
 
       span.setAttribute("demo.trace_id", payload.traceId);
-      span.setAttribute("demo.flag_enabled", payload.flagEnabled);
-      span.setAttribute("demo.nats_flow_executed", payload.natsFlowExecuted);
+      span.setAttribute("demo.span_id", payload.spanId);
 
       setStatus(status, "Trace completed.", "idle");
       renderResult(result, payload);

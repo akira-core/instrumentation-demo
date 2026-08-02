@@ -4,20 +4,18 @@
 # Edit live during a demo — neither the relay proxy nor the backend restarts:
 #   kubectl edit configmap demo-feature-flags -n demo
 #
-# Two flags, demonstrating the two layers a relay proxy can drive:
+# Library flags only. This demo does not evaluate application-level flags to
+# gate business behavior; the NATS round trip always runs on a successful
+# demo request.
 #
 #   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
 #                      application code involved. Flipping it to `disabled`
 #                      stops NATS producer/consumer spans being emitted at all,
-#                      live. Falls back to OTEL_NATS_TRACING_ENABLED when the
+#                      live. The NATS publish/consume/reply still runs.
+#                      Falls back to OTEL_NATS_TRACING_ENABLED when the
 #                      relay has no opinion. NOTE: the backend must not pass
 #                      otelnats.WithTracingEnabled(...) — that pins a connection
 #                      static and no relay value can reach it.
-#
-#   demo-nats-flow     consumed by APPLICATION code via the OpenFeature client.
-#                      Gates whether the backend runs the NATS round trip for a
-#                      request (reported back as natsFlowExecuted in the API
-#                      response).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -29,13 +27,6 @@ metadata:
 data:
   flags.yaml: |
     otel-nats-tracing:
-      variations:
-        enabled: true
-        disabled: false
-      defaultRule:
-        variation: enabled
-
-    demo-nats-flow:
       variations:
         enabled: true
         disabled: false

@@ -12,20 +12,8 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/akira-core/instrumentation-demo/backend/internal/featureflags"
 	"github.com/akira-core/instrumentation-demo/backend/internal/natsflow"
 )
-
-// demoNatsFlowFlagKey is the relay-proxy flag that gates the NATS
-// publish/consume/reply sub-flow. It is the application-level flag; the
-// library-level counterpart (otel-nats-tracing, which decides whether NATS
-// spans exist at all) is read by otelnats itself, not here.
-const demoNatsFlowFlagKey = "demo-nats-flow"
-
-// demoNatsFlowDefault is the value used when the relay proxy has no usable
-// opinion — unreachable, still starting, or flag undefined. Defaulting to
-// enabled keeps the demo working out of the box in that degraded state.
-const demoNatsFlowDefault = true
 
 // natsRoundTripTimeout bounds how long the handler waits for the NATS
 // reply before giving up (task 2.6).
@@ -36,10 +24,8 @@ const tracerName = "github.com/akira-core/instrumentation-demo/backend/httpapi"
 // demoTraceResponse is the fixed success response shape for
 // POST /api/demo-trace per the integration contract.
 type demoTraceResponse struct {
-	TraceID          string `json:"traceId"`
-	SpanID           string `json:"spanId"`
-	FlagEnabled      bool   `json:"flagEnabled"`
-	NatsFlowExecuted bool   `json:"natsFlowExecuted"`
+	TraceID string `json:"traceId"`
+	SpanID  string `json:"spanId"`
 }
 
 type errorResponse struct {
@@ -51,11 +37,13 @@ type errorResponse struct {
 // NewDemoTraceHandler builds the POST /api/demo-trace handler. It:
 //  1. extracts an incoming W3C trace context (or starts a root trace),
 //  2. opens a SERVER span for the request,
-//  3. evaluates the "demo-nats-flow" flag against the GOFF relay proxy through
-//     OpenFeature,
-//  4. when enabled, runs the full NATS publish/consume/reply round trip and
-//     waits for it before responding.
-func NewDemoTraceHandler(flags *featureflags.Client, nm *natsflow.Manager, logger *slog.Logger) http.HandlerFunc {
+//  3. always runs the full NATS publish/consume/reply round trip and waits
+//     for it before responding (no application-level feature flag gates this).
+//
+// Library-level NATS instrumentation (otel-nats-tracing) is resolved by
+// otelnats itself through the process-global OpenFeature provider installed
+// at startup — not by this handler.
+func NewDemoTraceHandler(nm *natsflow.Manager, logger *slog.Logger) http.HandlerFunc {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -85,20 +73,6 @@ func NewDemoTraceHandler(flags *featureflags.Client, nm *natsflow.Manager, logge
 		traceID := sc.TraceID().String()
 		spanID := sc.SpanID().String()
 
-		flagEnabled := flags.Enabled(ctx, demoNatsFlowFlagKey, demoNatsFlowDefault)
-		span.SetAttributes(attribute.Bool("demo.flag.enabled", flagEnabled))
-
-		resp := demoTraceResponse{
-			TraceID:     traceID,
-			SpanID:      spanID,
-			FlagEnabled: flagEnabled,
-		}
-
-		if !flagEnabled {
-			writeJSON(w, http.StatusOK, resp)
-			return
-		}
-
 		if err := nm.RunRoundTrip(ctx, natsRoundTripTimeout); err != nil {
 			logger.ErrorContext(ctx, "demo-trace: nats round trip failed", "error", err)
 			span.RecordError(err)
@@ -116,7 +90,9 @@ func NewDemoTraceHandler(flags *featureflags.Client, nm *natsflow.Manager, logge
 			return
 		}
 
-		resp.NatsFlowExecuted = true
-		writeJSON(w, http.StatusOK, resp)
+		writeJSON(w, http.StatusOK, demoTraceResponse{
+			TraceID: traceID,
+			SpanID:  spanID,
+		})
 	}
 }

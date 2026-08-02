@@ -1,16 +1,135 @@
 # instrumentation-demo
 
-Demo of W3C trace propagation across a full stack: a JS frontend calls a Go
-backend over HTTP, the backend publishes to NATS and consumes the reply, and
-a Kubernetes-native feature-flag relay proxy gates the flow — all visible as
-one trace in Grafana, backed by `rotel` + ClickHouse. Everything runs in a
-local `kind` cluster.
+End-to-end demo of **W3C trace propagation** and the sibling instrumentation
+libraries (`instrumentation-go` / `instrumentation-js`) running in a local
+`kind` cluster.
+
+A browser frontend starts a trace, calls a Go backend over HTTP, the backend
+publishes and consumes on NATS via `otelnats`, and the whole path is exported
+through `rotel` → ClickHouse and inspected in Grafana — including metrics via
+VictoriaMetrics. A GOFF relay proxy serves **library** feature flags
+(e.g. `otel-nats-tracing`) so you can prove dynamic instrumentation toggles.
+
+**Languages:** [繁體中文（README.zh-TW.md）](README.zh-TW.md)
+
+---
+
+## What this demo is for
+
+Use this stack to **check that our instrumentation libraries work in a
+realistic path**, not only in unit tests:
+
+| Library / package | Role in this demo |
+|---|---|
+| **`otelnats`** (`instrumentation-go`) | NATS publish/subscribe spans, W3C headers on messages, async **span links**, runtime flag `otel-nats-tracing` |
+| **OpenFeature + GOFF provider** (app installs provider only) | Lets `otelnats` resolve `otel-nats-tracing` at runtime without restarting |
+| **Browser OTel** (`@opentelemetry/sdk-trace-web` + fetch instrumentation) | CLIENT span + `traceparent` injection on `POST /api/demo-trace` |
+| **`@akira-core/otel-nats`** (`instrumentation-js`, submodule) | Available in-tree for JS NATS work; this UI demo focuses on the HTTP→Go→NATS path |
+
+If spans appear correctly in Grafana after a click, and flags turn library
+behavior on/off live, the libraries are wired the way production apps should
+wire them.
+
+---
+
+## Architecture
+
+### High-level components
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  kind cluster  (namespace: demo)                                            │
+│                                                                             │
+│  Browser ──port-forward──► Frontend (nginx + static JS)                     │
+│       │                         │                                           │
+│       │  POST /api/demo-trace   │  OTLP/HTTP (browser spans)                │
+│       │  + traceparent          ▼                                           │
+│       └──────────────────► Backend (Go) ──provider──► Relay proxy (GOFF)    │
+│                                  │                    ▲                     │
+│                                  │ otelnats           │ ConfigMap           │
+│                                  ▼   (library flags)  │ demo-feature-flags  │
+│                               NATS                    │ (otel-nats-tracing) │
+│                                  │                                          │
+│  Backend + Frontend + Relay ──► rotel ──► ClickHouse ◄── Grafana           │
+│  (OTLP)                         │                                           │
+│                                  └──► VictoriaMetrics ◄── Grafana (metrics) │
+│                                       (also scrapes NATS/CH/Grafana/relay)  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Component | Image / source | Responsibility |
+|---|---|---|
+| **frontend** | `frontend/` | Starts CLIENT span, injects W3C headers, shows result + Grafana link |
+| **backend** | `backend/` | SERVER span, installs OpenFeature provider, NATS request/reply via `otelnats` |
+| **NATS** | vendored chart | Message bus for the demo round trip |
+| **relay-proxy** | GOFF chart | Serves library flag `otel-nats-tracing` from a live ConfigMap |
+| **rotel** | deploy manifest | OTLP collector → ClickHouse (+ pipeline metrics) |
+| **ClickHouse** | vendored chart | Trace storage |
+| **Grafana** | vendored chart | Trace + metrics dashboards |
+| **VictoriaMetrics** | vendored chart | Metrics store (OTLP push + Prometheus scrape) |
+
+### Request flow (one click on **Start Trace**)
+
+1. **Frontend** — WebTracerProvider + Fetch instrumentation create a CLIENT
+   span and inject `traceparent` / `tracestate` on
+   `POST /api/demo-trace`.
+2. **Backend HTTP** — extracts context, starts a SERVER span
+   (`POST /api/demo-trace`). Same **trace ID** as the browser when
+   port-forwards and CORS propagation are correct.
+3. **NATS publish** — always runs on a successful path; `otelnats` PRODUCER
+   span when library tracing is on; W3C context in message headers.
+   Subject: `demo.trace.request`.
+4. **NATS consume + reply** — in-process subscriber (same binary, simulating
+   a downstream consumer) uses `otelnats` CONSUMER span on
+   `process demo.trace.request`, then publishes a reply on
+   `demo.trace.reply`.
+5. **Response** — JSON `{ traceId, spanId }` so you can paste the ID into
+   Grafana.
+
+### Important: NATS spans use span links (multiple trace IDs)
+
+A completed run produces **more than one trace ID by design**. The
+synchronous path (frontend → backend → NATS publish)
+shares the ID shown in the UI. NATS **consumer** spans are separate roots:
+`otelnats` attaches the publisher as an OTel **span link**, not a parent —
+intentional for async messaging (OTel messaging guidance).
+
+The provisioned Grafana dashboard has a panel for **span-linked async
+spans** so you can still see the full story.
+
+### Telemetry pipeline
+
+```
+Services (OTLP/HTTP or gRPC)
+        │
+        ▼
+     rotel  ──batch──►  ClickHouse (otel_traces)  ──query──►  Grafana (traces)
+        │
+        └── OTLP metrics ──► VictoriaMetrics ──query──► Grafana (Ecosystem Metrics)
+```
+
+Prometheus scrape targets (NATS, ClickHouse, Grafana, relay) also land in
+VictoriaMetrics.
+
+### Feature flags (library only)
+
+| Flag | Consumed by | When `disabled` |
+|---|---|---|
+| `otel-nats-tracing` | **`otelnats` library** (no app code) | NATS producer/consumer spans stop; the round trip **still runs** |
+
+There is **no** application-level flag gating the NATS hop. The backend must
+**not** call `otelnats.WithTracingEnabled(...)` — that pins the connection
+static and the relay can never change it. Global kill switch (env only):
+`OTEL_INSTRUMENTATION_GO_TRACING_ENABLED` must be on for any library
+evaluation to run.
+
+---
 
 ## Repo layout
 
 - `frontend/` — browser app that starts a trace and calls the backend.
-- `backend/` — Go HTTP service; continues the trace, evaluates a feature
-  flag, publishes/consumes on NATS.
+- `backend/` — Go HTTP service; continues the trace, installs OpenFeature for
+  library flags, publishes/consumes on NATS.
 - `deploy/` — `kind` cluster config, Kustomize base for the in-house
   services, and Helm values for the vendored charts.
 - `charts/` — vendored third-party Helm charts (NATS, ClickHouse, Grafana,
@@ -21,6 +140,8 @@ local `kind` cluster.
 - `third_party/` — git submodules for the sibling instrumentation repos
   (`instrumentation-js`, `instrumentation-go`) this demo consumes.
 - `openspec/` — planning artifacts for this repo's changes.
+
+---
 
 ## Getting the code
 
@@ -57,39 +178,124 @@ git submodule set-branch --branch <branch> third_party/<repo>
 git submodule update --remote third_party/<repo>
 ```
 
+---
+
 ## Running the demo
 
 Requires `docker`, `kind`, `helm`, and `kubectl` locally.
 
 ```sh
-make deploy      # create the kind cluster, build+load images, install the
-                  # vendored charts (NATS/ClickHouse/Grafana), apply the
-                  # in-house services (frontend/backend/relay-proxy/rotel)
+make deploy      # reuse kind cluster if it already exists (never recreates it),
+                  # build+load images, install/upgrade charts, apply services
+make port-forward  # wait until Ready, then open all local ports (Ctrl-C to stop)
+# alias: make pf
 ```
 
-`make deploy` is safe to re-run — it upgrades in place rather than failing on
-an already-existing cluster/release.
+`make deploy` is safe to re-run: if kind cluster `demo-trace` already exists it
+is **reused** (not deleted/recreated); Helm upgrades in place and manifests are
+re-applied. Only `make teardown` removes the cluster.
 
 ### Accessing the demo
 
-Services are reachable via `kubectl port-forward` (no Ingress in this demo —
-see `openspec/changes/demo-trace-propagation-stack/design.md` for why):
+After `make deploy`, start port-forwards with a single command (no Ingress —
+see design.md for why):
 
 ```sh
-kubectl port-forward -n demo svc/frontend 8081:8080   # http://localhost:8081
-kubectl port-forward -n demo svc/backend  8080:8080   # http://localhost:8080 (frontend calls this directly)
-kubectl port-forward -n demo svc/grafana  3000:3000   # http://localhost:3000  (admin / demo-grafana-admin)
+make port-forward
 ```
 
-Run all three in separate terminals (or backgrounded), then open
-`http://localhost:8081` and click **Start Trace**. The frontend's baked-in
-defaults already point at `localhost:8080` (backend) and `localhost:4318`
-(OTLP — port-forward `svc/rotel 4318:4318` too if you want the frontend's own
-browser-side spans to reach Grafana, not just the backend/relay-proxy/NATS
-spans), so no extra configuration is needed for the default port-forward
-setup above.
+This waits for core deployments, then forwards:
 
-### Feature flags
+| Local URL | Service | Notes |
+|---|---|---|
+| http://localhost:8081 | frontend | open this and click **Start Trace** |
+| http://localhost:8080 | backend | browser calls this directly |
+| http://localhost:3000 | grafana | `admin` / `demo-grafana-admin` |
+| http://localhost:4318 | rotel | browser OTLP (frontend spans) |
+
+Leave that terminal running; Ctrl-C stops all forwards. Override ports if needed:
+
+```sh
+make port-forward PF_FRONTEND_PORT=9081 PF_GRAFANA_PORT=3001
+```
+
+---
+
+## How to verify instrumentation is working
+
+Use this checklist after `make deploy` and the port-forwards above. Treat it
+as a manual acceptance test for the libraries this demo consumes.
+
+### 1. Happy path — one click
+
+1. Open `http://localhost:8081`.
+2. Click **Start Trace**.
+3. Expect UI fields: `traceId` / `spanId` present (hex IDs).
+4. Open Grafana (`http://localhost:3000`, `admin` / `demo-grafana-admin`).
+5. Open the provisioned **trace** dashboard (or Explore → ClickHouse traces).
+6. Paste the `traceId` from the UI.
+
+**Pass criteria (synchronous path, same trace ID):**
+
+| What you should see | Why it proves |
+|---|---|
+| Frontend CLIENT / fetch span | Browser SDK + fetch instrumentation |
+| Backend `POST /api/demo-trace` SERVER span, **same trace ID** | W3C extract/inject across HTTP |
+| NATS **publish** / PRODUCER-style span under that trace | `otelnats` publisher instrumentation |
+
+**Pass criteria (async NATS path, linked traces):**
+
+| What you should see | Why it proves |
+|---|---|
+| `process demo.trace.request` (and reply path) under **other** trace IDs | Consumer uses span links, not parent-child |
+| Span links from consumer → producer context | Header propagation on NATS messages worked |
+| Dashboard panel “Span-linked async spans” shows those consumers | End-to-end story is visible without forcing one waterfall |
+
+If the UI shows success but Grafana has **no** backend SERVER span sharing the
+frontend `traceId`, propagation or export is broken (check port-forwards,
+CORS `traceparent`, and rotel → ClickHouse).
+
+### 2. Library flag — turn NATS instrumentation off live
+
+This is the **only** flag verification this demo requires.
+
+```sh
+kubectl edit configmap demo-feature-flags -n demo
+# set otel-nats-tracing defaultRule.variation to: disabled
+```
+
+Wait ~1s (relay re-reads the ConfigMap; nothing restarts). Click **Start Trace**
+again.
+
+| Expect | Meaning |
+|---|---|
+| UI still returns `traceId` / `spanId` (success) | NATS business path still ran |
+| **No** new NATS producer/consumer spans in Grafana | `otelnats` honored `otel-nats-tracing` without app changes |
+
+Flip back to `enabled` and confirm spans return on the next click.
+
+### 3. Metrics smoke check (optional)
+
+```sh
+kubectl port-forward -n demo svc/victoria-metrics 8428:8428
+curl -s 'http://localhost:8428/api/v1/query?query=up'
+```
+
+Scraped targets should report `1`. Grafana’s **Ecosystem Metrics** dashboard
+should show rotel ingest and dependency health.
+
+### 4. What “broken library” usually looks like
+
+| Symptom | Likely cause |
+|---|---|
+| Success response but no NATS spans, with `otel-nats-tracing` enabled | `otelnats` not wrapping publish/subscribe, or global kill switch off (`OTEL_INSTRUMENTATION_GO_TRACING_ENABLED`) |
+| NATS works but flipping `otel-nats-tracing` does nothing | Connection pinned with `WithTracingEnabled`, or OpenFeature provider not installed |
+| Frontend and backend different trace IDs | Missing `traceparent` (CORS / fetch instrumentation / wrong backend URL) |
+| Spans never appear in Grafana | OTLP export path (rotel, port-forward `4318`, ClickHouse) |
+
+---
+
+## Feature flags (reference)
 
 The GO Feature Flag relay proxy reads its flag definitions straight from the
 `demo-feature-flags` ConfigMap through the Kubernetes API. Edit it live — the
@@ -99,24 +305,12 @@ relay proxy re-reads within a second and **nothing restarts**:
 kubectl edit configmap demo-feature-flags -n demo
 ```
 
-Two flags, demonstrating the two layers a relay proxy can drive:
+If the relay proxy is unreachable, library evaluations fall back to
+`OTEL_NATS_TRACING_ENABLED`, so the demo still works.
 
-| Flag | Consumed by | Effect when set to `disabled` |
-|---|---|---|
-| `otel-nats-tracing` | the `otelnats` **library** itself, no app code involved | NATS producer/consumer spans stop being emitted; the NATS round trip still runs |
-| `demo-nats-flow` | **application** code, via the OpenFeature client | the backend skips the NATS round trip entirely (`natsFlowExecuted: false`) |
+---
 
-`otel-nats-tracing` is the interesting one: it is resolved per operation by the
-instrumentation library, so flipping it turns instrumentation on and off in a
-running process. Note the backend deliberately does **not** pass
-`otelnats.WithTracingEnabled(...)` — that pins a connection static and no relay
-change could reach it.
-
-If the relay proxy is unreachable, evaluations fall back to the backend's
-environment variables (`OTEL_NATS_TRACING_ENABLED`, and the in-code default for
-`demo-nats-flow`), so the demo still works.
-
-### Metrics
+## Metrics
 
 VictoriaMetrics (single node) collects metrics from the whole stack, two ways:
 
@@ -133,7 +327,9 @@ kubectl port-forward -n demo svc/victoria-metrics 8428:8428   # http://localhost
 curl -s 'http://localhost:8428/api/v1/query?query=up'         # all scrape targets should report 1
 ```
 
-### Performance testing
+---
+
+## Performance testing
 
 `otel-loadgen` (from the rotel authors) drives synthetic OTLP **trace** load at
 rotel's gRPC endpoint. It never runs as part of `make deploy` — start it
@@ -155,20 +351,9 @@ exactly 180,000 spans end-to-end (~4,000 spans/sec) with zero loss and no pod
 restarts. Treat numbers like these as indicative of relative behavior on your
 machine, not as benchmarks.
 
-### A note on the NATS spans and trace IDs
+---
 
-A completed demo run produces **more than one trace ID**, by design. The
-synchronous part (frontend → backend → flag evaluation → NATS publish) shares
-the trace ID the frontend displays. The NATS *consumer* spans do not: `otelnats`
-starts each `process <subject>` span as its own root trace and attaches the
-publisher as an OTel **span link** rather than a parent — its documented,
-intentional design for asynchronous messaging, and standard OTel guidance.
-
-The provisioned Grafana dashboard reflects this: the timeline and span table
-cover the entered trace ID, and a third panel ("Span-linked async spans")
-follows the links to surface the NATS spans that live under their own trace IDs.
-
-### Tearing down
+## Tearing down
 
 ```sh
 make teardown     # deletes the kind cluster and everything in it

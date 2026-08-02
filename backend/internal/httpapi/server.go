@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/akira-core/instrumentation-demo/backend/internal/featureflags"
 	"github.com/akira-core/instrumentation-demo/backend/internal/natsflow"
 )
 
@@ -29,10 +28,10 @@ import (
 // /healthz is deliberately left unwrapped: kubelet probes it every few seconds
 // and would otherwise dominate the request metrics with traffic nobody cares
 // about.
-func NewMux(corsAllowedOrigin string, flags *featureflags.Client, nm *natsflow.Manager, logger *slog.Logger) http.Handler {
+func NewMux(corsAllowedOrigin string, nm *natsflow.Manager, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 
-	demo := withCORS(corsAllowedOrigin, NewDemoTraceHandler(flags, nm, logger))
+	demo := withCORS(corsAllowedOrigin, NewDemoTraceHandler(nm, logger))
 	mux.Handle("/api/demo-trace", otelhttp.NewHandler(demo, "POST /api/demo-trace",
 		otelhttp.WithTracerProvider(noop.NewTracerProvider()),
 	))

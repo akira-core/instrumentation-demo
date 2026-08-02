@@ -1,6 +1,6 @@
 ## Purpose
 
-Provides a feature-flag relay proxy that sources its flag definitions from the cluster's own Kubernetes configuration rather than an external SaaS, and serves them over a standard flag-evaluation protocol so that both application code and the instrumentation library itself can be reconfigured at runtime without a restart.
+Provides a feature-flag relay proxy that sources its flag definitions from the cluster's own Kubernetes configuration rather than an external SaaS, and serves them over a standard flag-evaluation protocol so that **instrumentation libraries** can be reconfigured at runtime without a restart. The demo does not use application-level flags to gate business behavior.
 
 ## ADDED Requirements
 
@@ -33,27 +33,38 @@ The relay proxy SHALL expose flag evaluation over a protocol that a standard Ope
 - **WHEN** a client evaluates a flag key that is not defined in the current configuration
 - **THEN** the client receives its supplied default value rather than an error or an undefined state
 
-### Requirement: Application behavior is gated on relay proxy evaluation
-The backend SHALL evaluate a feature flag through the relay proxy during the demo flow and SHALL use the result to decide whether to execute the NATS round trip. That evaluation SHALL be part of the same trace as the rest of the request.
+### Requirement: Flag configuration exposes instrumentation library flags only
+The Kubernetes configuration source SHALL define the instrumentation library tracing flag(s) exercised by this demo (at minimum `otel-nats-tracing` for Go `otelnats`). It SHALL NOT define application-level flags whose only purpose is to gate the demo's NATS business path from application code.
 
-#### Scenario: Flag evaluation is visible in the demo trace
-- **WHEN** the backend evaluates the demo flag while handling a demo request
-- **THEN** the evaluation produces a span sharing the trace ID of that request's other synchronous spans
+#### Scenario: ConfigMap lists library tracing flag
+- **WHEN** an operator inspects the flag definitions in the Kubernetes configuration source
+- **THEN** `otel-nats-tracing` is present with enabled/disabled variations
 
-#### Scenario: Disabling the flag suppresses the gated behavior
-- **WHEN** the demo flag is set to disabled and a demo request is made
-- **THEN** the backend skips the NATS round trip, reports that it was skipped in its response, and still completes the request successfully
+#### Scenario: No application NATS-flow gate flag
+- **WHEN** an operator inspects the flag definitions in the Kubernetes configuration source
+- **THEN** there is no application flag that the demo backend evaluates to skip or run the NATS round trip
+
+### Requirement: Backend installs OpenFeature for libraries, not app gating
+The backend SHALL register a process-global OpenFeature provider pointed at the relay proxy at startup so instrumentation modules can resolve flags, and SHALL NOT pin NATS instrumentation to a static tracing state (for example via `otelnats.WithTracingEnabled(...)`). The backend SHALL NOT evaluate an application feature flag to decide whether to execute the NATS round trip; a successful demo request SHALL always attempt the NATS path.
+
+#### Scenario: Provider is installed without static tracing pin
+- **WHEN** the backend starts and connects to NATS for the demo flow
+- **THEN** the OpenFeature provider is configured against the relay proxy and the NATS connection is not pinned with a static tracing-enabled option that would bypass OpenFeature
+
+#### Scenario: Demo request always runs NATS when healthy
+- **WHEN** a demo request is handled successfully and NATS is reachable
+- **THEN** the backend performs the NATS publish/consume/reply round trip without consulting an application-level feature flag
 
 #### Scenario: Relay proxy unavailable does not fail the request
 - **WHEN** the relay proxy cannot be reached during a demo request
-- **THEN** the backend falls back to its configured default rather than returning an error to the caller
+- **THEN** the backend still completes the request using instrumentation environment-variable defaults rather than returning an error solely because flag evaluation failed
 
 ### Requirement: Instrumentation tracing is togglable at runtime via the relay proxy
 The NATS instrumentation's own tracing SHALL be controlled by a flag served from the relay proxy, so that an operator can turn instrumentation on or off by editing the Kubernetes configuration source, with no application restart and no application code involved in the decision. Application configuration SHALL NOT pin the instrumentation to a static tracing state, since doing so would make the relay unable to affect it.
 
 #### Scenario: Operator disables NATS tracing at runtime
 - **WHEN** an operator sets the NATS tracing flag to disabled in the Kubernetes configuration source while the backend is running
-- **THEN** subsequent demo requests produce no NATS instrumentation spans, without the backend being restarted
+- **THEN** subsequent demo requests still complete the NATS round trip as business behavior, but produce no NATS instrumentation spans, without the backend being restarted
 
 #### Scenario: Operator re-enables NATS tracing at runtime
 - **WHEN** an operator sets that flag back to enabled

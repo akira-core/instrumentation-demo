@@ -43,18 +43,16 @@ func main() {
 		}
 	}()
 
-	// Install the OpenFeature provider before anything evaluates a flag. This
-	// serves both this application's own flags AND otelnats's internal
-	// otel-nats-tracing lookup — the library reads the process-global client
-	// but never installs a provider itself.
+	// Install the OpenFeature provider so otelnats can resolve otel-nats-tracing
+	// at runtime. The library reads the process-global client but never installs
+	// a provider itself. Application request handlers do not evaluate flags.
 	featureflags.Setup(ctx, cfg.RelayProxyURL, logger)
-	flags := featureflags.New()
 
 	natsManager := natsflow.NewManager(cfg.NATSURL, logger)
 	natsManager.Start(ctx)
 	defer natsManager.Close()
 
-	mux := httpapi.NewMux(cfg.CORSAllowedOrigin, flags, natsManager, logger)
+	mux := httpapi.NewMux(cfg.CORSAllowedOrigin, natsManager, logger)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

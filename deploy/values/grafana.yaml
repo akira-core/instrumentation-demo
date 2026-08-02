@@ -369,7 +369,7 @@ dashboards:
               "id": 7,
               "type": "timeseries",
               "title": "Relay proxy — flag evaluation activity",
-              "description": "From the GOFF relay proxy's monitoring port (relay-proxy:1032). Rises with demo request rate, since each request evaluates demo-nats-flow.",
+              "description": "From the GOFF relay proxy's monitoring port (relay-proxy:1032). Library flag evaluations (e.g. otel-nats-tracing via otelnats) may appear here; the demo does not evaluate application-level flags per request.",
               "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
               "datasource": { "type": "prometheus", "uid": "victoriametrics" },
               "targets": [
