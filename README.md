@@ -8,7 +8,8 @@ A browser frontend starts a trace, calls a Go backend over HTTP, the backend
 publishes and consumes on NATS via `otelnats`, and the whole path is exported
 through `rotel` → ClickHouse and inspected in Grafana — including metrics via
 VictoriaMetrics. A GOFF relay proxy serves **library** feature flags
-(e.g. `otel-nats-tracing`) so you can prove dynamic instrumentation toggles.
+(e.g. `otel-nats-tracing`) so you can prove an operator can **revoke**
+instrumentation on a running process, with no application code and no restart.
 
 **Languages:** [繁體中文（README.zh-TW.md）](README.zh-TW.md)
 
@@ -21,14 +22,14 @@ realistic path**, not only in unit tests:
 
 | Library / package | Role in this demo |
 |---|---|
-| **`otelnats`** (`instrumentation-go`) | NATS publish/subscribe spans, W3C headers on messages, async **span links**, runtime flag `otel-nats-tracing` |
-| **OpenFeature + GOFF provider** (app installs provider only) | Lets `otelnats` resolve `otel-nats-tracing` at runtime without restarting |
+| **`otelnats`** (`instrumentation-go`) | NATS publish/subscribe spans, W3C headers on messages, async **span links**, runtime kill switch `otel-nats-tracing` |
+| **OpenFeature + GOFF provider** (**zero application code**) | `otelnats` installs its own provider from `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` and resolves `otel-nats-tracing` per operation |
 | **Browser OTel** (`@opentelemetry/sdk-trace-web` + fetch instrumentation) | CLIENT span + `traceparent` injection on `POST /api/demo-trace` |
 | **`@akira-core/otel-nats`** (`instrumentation-js`, submodule) | Available in-tree for JS NATS work; this UI demo focuses on the HTTP→Go→NATS path |
 
-If spans appear correctly in Grafana after a click, and flags turn library
-behavior on/off live, the libraries are wired the way production apps should
-wire them.
+If spans appear correctly in Grafana after a click, and revoking a flag stops
+library instrumentation live while the business path keeps running, the
+libraries are wired the way production apps should wire them.
 
 ---
 
@@ -44,11 +45,12 @@ wire them.
 │       │                         │                                           │
 │       │  POST /api/demo-trace   │  OTLP/HTTP (browser spans)                │
 │       │  + traceparent          ▼                                           │
-│       └──────────────────► Backend (Go) ──provider──► Relay proxy (GOFF)    │
-│                                  │                    ▲                     │
-│                                  │ otelnats           │ ConfigMap           │
-│                                  ▼   (library flags)  │ demo-feature-flags  │
-│                               NATS                    │ (otel-nats-tracing) │
+│       └──────────────────► Backend (Go)               Relay proxy (GOFF)    │
+│                                  │  ▲                 ▲                     │
+│                                  │  └─otelnats polls──┘ ConfigMap           │
+│                                  │    (no app code)   │ demo-feature-flags  │
+│                                  ▼                    │ (otel-nats-tracing) │
+│                               NATS                    │                     │
 │                                  │                                          │
 │  Backend + Frontend + Relay ──► rotel ──► ClickHouse ◄── Grafana           │
 │  (OTLP)                         │                                           │
@@ -60,9 +62,9 @@ wire them.
 | Component | Image / source | Responsibility |
 |---|---|---|
 | **frontend** | `frontend/` | Starts CLIENT span, injects W3C headers, shows result + Grafana link |
-| **backend** | `backend/` | SERVER span, installs OpenFeature provider, NATS request/reply via `otelnats` |
+| **backend** | `backend/` | SERVER span, NATS request/reply via `otelnats` (no feature-flag code of its own) |
 | **NATS** | vendored chart | Message bus for the demo round trip |
-| **relay-proxy** | GOFF chart | Serves library flag `otel-nats-tracing` from a live ConfigMap |
+| **relay-proxy** | GOFF chart | Serves the library kill switch `otel-nats-tracing` from a live ConfigMap |
 | **rotel** | ClickHouse chart (subchart) | OTLP collector → ClickHouse (+ pipeline metrics → VM) |
 | **ClickHouse** | vendored chart (Altinity operator) | Trace storage (CHI + Keeper) |
 | **Grafana** | vendored chart | Trace + metrics dashboards |
@@ -117,19 +119,46 @@ VictoriaMetrics.
 |---|---|---|
 | `otel-nats-tracing` | **`otelnats` library** (no app code) | NATS producer/consumer spans stop; the round trip **still runs** |
 
-There is **no** application-level flag gating the NATS hop. The backend must
-**not** call `otelnats.WithTracingEnabled(...)` — that pins the connection
-static and the relay can never change it. Global kill switch (env only):
-`OTEL_INSTRUMENTATION_GO_TRACING_ENABLED` must be on for any library
-evaluation to run.
+There is **no** application-level flag gating the NATS hop, and **no backend
+code touches OpenFeature at all**. Setting
+`OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` is the entire wiring: `otelnats`
+builds its own GO Feature Flag provider on the first instrumented operation,
+binds it to its private OpenFeature domain (`otel-instrumentation-go`), and
+hardcodes the two settings that are easy to get wrong by hand — in-process
+evaluation and a disabled data collector. It never touches the *default*
+provider, so an application's own flags are unaffected.
+
+Tracing is the conjunction of **three tiers**, and the relay is the only one
+that can change without a redeploy:
+
+```
+tracing = OTEL_INSTRUMENTATION_GO_TRACING_ENABLED   (env, whole process)
+       && OTEL_NATS_TRACING_ENABLED                 (env, this module)
+       && relay flag otel-nats-tracing              (resolved per operation)
+```
+
+**The relay can only revoke.** It cannot enable what the environment left off —
+with either variable falsy, `otelnats` allocates only its passthrough
+implementation and never evaluates the flag at all. Both are set truthy in
+`deploy/base/backend.yaml`, which is what puts this demo under relay control.
+Every failure path — relay unreachable, provider not yet fetched, key missing,
+wrong type — resolves to "no opinion", so the environment alone decides and the
+demo keeps working with the relay down.
+
+The backend must **not** call `otelnats.WithTracingEnabled(...)`: since 0.8.0
+that option and `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED` are two spellings of
+one switch and are mutually exclusive, so passing both is a construction error
+(`ErrTracingConfigConflict`). It no longer pins a connection — a connection
+carrying it still follows the relay.
 
 ---
 
 ## Repo layout
 
 - `frontend/` — browser app that starts a trace and calls the backend.
-- `backend/` — Go HTTP service; continues the trace, installs OpenFeature for
-  library flags, publishes/consumes on NATS.
+- `backend/` — Go HTTP service; continues the trace and publishes/consumes on
+  NATS. Contains no feature-flag code: `otelnats` wires itself to the relay
+  from the environment.
 - `deploy/` — `kind` cluster config, Kustomize base for the in-house
   services, and Helm values for the vendored charts.
 - `charts/` — vendored third-party Helm charts (NATS, ClickHouse via the
@@ -270,7 +299,7 @@ If the UI shows success but Grafana has **no** backend SERVER span sharing the
 frontend `traceId`, propagation or export is broken (check port-forwards,
 CORS `traceparent`, and rotel → ClickHouse).
 
-### 2. Library flag — turn NATS instrumentation off live
+### 2. Library flag — revoke NATS instrumentation live
 
 This is the **only** flag verification this demo requires.
 
@@ -279,15 +308,25 @@ kubectl edit configmap demo-feature-flags -n demo
 # set otel-nats-tracing defaultRule.variation to: disabled
 ```
 
-Wait ~1s (relay re-reads the ConfigMap; nothing restarts). Click **Start Trace**
-again.
+Wait **~3s** — two hops, neither of which restarts anything: the relay re-reads
+the ConfigMap (`pollingInterval: 1000`), then the backend's provider polls the
+relay (`OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL: 2s`). Then click **Start
+Trace** again.
 
 | Expect | Meaning |
 |---|---|
 | UI still returns `traceId` / `spanId` (success) | NATS business path still ran |
-| **No** new NATS producer/consumer spans in Grafana | `otelnats` honored `otel-nats-tracing` without app changes |
+| **No** new NATS producer/consumer spans in Grafana | `otelnats` honored the revocation without app changes |
 
-Flip back to `enabled` and confirm spans return on the next click.
+Restore `enabled` and confirm spans return on the next click. Note what that
+proves and what it does not: restoring the flag **lifts a revocation**, it does
+not enable anything. Spans come back only because both environment tiers are
+on. Set `OTEL_NATS_TRACING_ENABLED=0` on the Deployment and no flag value will
+bring them back — that is the point of a revoke-only relay, and
+`TestRelayCannotEnableNatsInstrumentation` pins it.
+
+In production the default poll interval is **60s**, not 2s. Plan an incident
+response around the poll interval, not around "immediately".
 
 ### 3. Metrics smoke check (optional)
 
@@ -303,8 +342,10 @@ should show rotel ingest and dependency health.
 
 | Symptom | Likely cause |
 |---|---|
-| Success response but no NATS spans, with `otel-nats-tracing` enabled | `otelnats` not wrapping publish/subscribe, or global kill switch off (`OTEL_INSTRUMENTATION_GO_TRACING_ENABLED`) |
-| NATS works but flipping `otel-nats-tracing` does nothing | Connection pinned with `WithTracingEnabled`, or OpenFeature provider not installed |
+| Success response but no NATS spans, with `otel-nats-tracing` enabled | `otelnats` not wrapping publish/subscribe, or an env tier is off — the relay cannot enable what `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED` / `OTEL_NATS_TRACING_ENABLED` left off |
+| Backend logs `unrecognised boolean value; treated as disabled` | An env switch is set to something outside `1`/`true`/`yes`/`on`. An empty string counts as off |
+| NATS never connects, logs a config error on every retry | `otelnats.WithTracingEnabled(...)` reintroduced in `natsflow` while the env var is also set — they are mutually exclusive (`ErrTracingConfigConflict`) |
+| Revoking `otel-nats-tracing` does nothing | `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` unset (no provider installed), or fewer than ~3s elapsed since the edit |
 | Frontend and backend different trace IDs | Missing `traceparent` (CORS / fetch instrumentation / wrong backend URL) |
 | Spans never appear in Grafana | OTLP export path (rotel, port-forward `4318`, ClickHouse) |
 
@@ -320,8 +361,34 @@ relay proxy re-reads within a second and **nothing restarts**:
 kubectl edit configmap demo-feature-flags -n demo
 ```
 
-If the relay proxy is unreachable, library evaluations fall back to
-`OTEL_NATS_TRACING_ENABLED`, so the demo still works.
+The relevant environment variables, all read by `otelnats` itself:
+
+| Variable | Set to | Purpose |
+|---|---|---|
+| `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED` | `1` | Process-wide kill switch. No relay counterpart |
+| `OTEL_NATS_TRACING_ENABLED` | `1` | This module's tier. Off ⇒ zero-cost passthrough, flag never evaluated |
+| `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` | `http://relay-proxy:1031` | Unset ⇒ no provider is installed and no revocation is possible |
+| `OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL` | `2s` | Go duration string. Library default `60s` |
+| `OTEL_SERVICE_NAME` | `demo-backend` | Doubles as the `service.name` targeting attribute on every evaluation |
+
+Because `OTEL_SERVICE_NAME` is supplied as a targeting attribute, a relay rule
+can revoke one service instead of every process resolving the flag:
+
+```yaml
+otel-nats-tracing:
+  variations: { enabled: true, disabled: false }
+  targeting:
+    - query: service.name eq "demo-backend"
+      variation: disabled
+  defaultRule:
+    variation: enabled
+```
+
+If the relay proxy is unreachable, or has not been reached yet, evaluations
+resolve to "no opinion" — which means *do not interfere* — so the environment
+alone decides and the demo still works. The cost of that fail-safe: a process
+that starts while the relay is down comes up instrumented and cannot learn about
+an already-active revocation until its first successful poll.
 
 ---
 

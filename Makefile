@@ -112,7 +112,8 @@ kind-load: build-images
 # The clickhouse release also deploys rotel (Service name "rotel") and the
 # ClickHouse client Service (name "clickhouse") — see deploy/values/clickhouse.yaml.
 # The relay-proxy release name must stay "relay-proxy" so its Service resolves
-# at the address the backend is configured with.
+# at the address otelnats is pointed at (OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
+# in deploy/base/backend.yaml).
 #
 # ClickHouse is installed in two steps on first apply so CRDs from the operator
 # exist before the CHI/CHK custom resources are created (avoids a race where

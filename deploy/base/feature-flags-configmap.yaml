@@ -9,13 +9,30 @@
 # demo request.
 #
 #   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
-#                      application code involved. Flipping it to `disabled`
+#                      application code involved. Setting it to `disabled`
 #                      stops NATS producer/consumer spans being emitted at all,
 #                      live. The NATS publish/consume/reply still runs.
-#                      Falls back to OTEL_NATS_TRACING_ENABLED when the
-#                      relay has no opinion. NOTE: the backend must not pass
-#                      otelnats.WithTracingEnabled(...) — that pins a connection
-#                      static and no relay value can reach it.
+#
+# This flag is a KILL SWITCH ONLY. It can revoke instrumentation the deployment
+# turned on; it can never turn anything on. Effective tracing is
+#
+#   OTEL_INSTRUMENTATION_GO_TRACING_ENABLED && OTEL_NATS_TRACING_ENABLED
+#   && this flag
+#
+# so with either environment variable off (deploy/base/backend.yaml sets both
+# truthy) no value here has any effect — the flag is not even evaluated. The
+# `enabled` variation below therefore does not enable anything; it declines to
+# revoke, which is also what every failure path resolves to: relay unreachable,
+# provider not yet ready, key absent, wrong type. All of them mean "the
+# environment decides".
+#
+# Latency is the backend provider's poll interval
+# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s in this demo) on top of the
+# relay's own ConfigMap re-read (pollingInterval: 1000 in
+# deploy/values/relay-proxy.yaml) — a few seconds, not instant.
+#
+# There is no relay key for the process-wide kill switch, by design: stopping a
+# process entirely is a redeploy, not a flag.
 apiVersion: v1
 kind: ConfigMap
 metadata:

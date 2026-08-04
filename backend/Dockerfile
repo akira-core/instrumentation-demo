@@ -6,15 +6,13 @@
 # Only backend/ and third_party/instrumentation-go/otel-nats/ are copied in
 # (not the whole third_party/ tree) to keep the build context reasonable.
 #
-# NOTE ON go.work: the repo-root go.work also lists ./relay-proxy as a
-# workspace member. This image's build context intentionally does NOT
-# include relay-proxy/ (it isn't a backend dependency), so the root go.work
-# can't be copied in verbatim — `go build` would fail trying to load a
-# workspace member directory that doesn't exist in the image. Instead this
-# stage generates its own two-member go.work (backend + otel-nats only)
-# inside the image with `go work init`, which resolves otel-nats from the
-# copied-in submodule path exactly like the repo-root workspace does for
-# local dev, without needing relay-proxy/ present.
+# NOTE ON go.work: the repo-root go.work is not copied in. This stage
+# generates its own inside the image with `go work init`, so otel-nats
+# resolves to the copied-in submodule path exactly as it does for local dev,
+# without the image depending on the layout of a file outside its context.
+# That resolution is what matters: backend/go.mod's `require` line names
+# v0.7.0, the newest published tag, while the submodule is 0.8.0 — the
+# workspace is what makes the built binary the submodule's code.
 
 FROM golang:1.26-alpine AS build
 

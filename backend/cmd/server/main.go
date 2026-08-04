@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/akira-core/instrumentation-demo/backend/internal/config"
-	"github.com/akira-core/instrumentation-demo/backend/internal/featureflags"
 	"github.com/akira-core/instrumentation-demo/backend/internal/httpapi"
 	"github.com/akira-core/instrumentation-demo/backend/internal/natsflow"
 	"github.com/akira-core/instrumentation-demo/backend/internal/telemetry"
@@ -43,11 +42,21 @@ func main() {
 		}
 	}()
 
-	// Install the OpenFeature provider so otelnats can resolve otel-nats-tracing
-	// at runtime. The library reads the process-global client but never installs
-	// a provider itself. Application request handlers do not evaluate flags.
-	featureflags.Setup(ctx, cfg.RelayProxyURL, logger)
-
+	// No OpenFeature setup here, deliberately. otelnats 0.8.0 installs its own
+	// provider from OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT on the first
+	// instrumented operation, bound to its private OpenFeature domain
+	// (otel-instrumentation-go) with in-process evaluation and the data
+	// collector disabled — the two settings an application-installed provider
+	// has to get right and can silently get wrong. It never touches the DEFAULT
+	// provider, so an application's own feature flags are unaffected.
+	//
+	// The trade-off this accepts: the auto-install is non-blocking, so between
+	// process start and the provider's first fetch every flag reads as "no
+	// opinion" and the environment alone decides. A revocation that was already
+	// active when this process started is therefore missed for up to one poll
+	// interval. Closing that window means installing a provider here with
+	// openfeature.SetProviderAndWait before the first otelnats.Connect — worth
+	// it for a service where a stray span is an incident, not for this demo.
 	natsManager := natsflow.NewManager(cfg.NATSURL, logger)
 	natsManager.Start(ctx)
 	defer natsManager.Close()
@@ -69,7 +78,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("demo-backend listening", "port", cfg.Port, "relayProxyURL", cfg.RelayProxyURL, "natsURL", cfg.NATSURL, "otlpEndpoint", cfg.OTLPEndpoint)
+	logger.Info("demo-backend listening", "port", cfg.Port, "flagsEndpoint", cfg.FlagsEndpoint, "natsURL", cfg.NATSURL, "otlpEndpoint", cfg.OTLPEndpoint)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("http server error", "error", err)
 		os.Exit(1)

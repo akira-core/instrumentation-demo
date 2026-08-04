@@ -3,11 +3,20 @@ module github.com/akira-core/instrumentation-demo/backend
 go 1.26.5
 
 require (
+	// This is a floor, not what gets built. Both the repo-root go.work and the
+	// image's generated one resolve otel-nats to third_party/instrumentation-go,
+	// currently 0.8.0 (unreleased, hence not requirable by version). The demo
+	// targets 0.8.0's revoke-only kill-switch model; bump this line once the tag
+	// exists. `go mod tidy` computes against v0.7.0's dependency graph, which is
+	// why the GO Feature Flag provider tree is absent below — 0.8.0 pulls it in
+	// through otel-nats's own go.mod, no longer through this module.
 	github.com/akira-core/instrumentation-go/otel-nats v0.7.0
 	github.com/nats-io/nats-server/v2 v2.12.6
 	github.com/nats-io/nats.go v1.50.0
-	github.com/open-feature/go-sdk v1.17.0
-	github.com/open-feature/go-sdk-contrib/providers/go-feature-flag v1.1.1
+	// Test-only now: the backend installs no provider of its own, but the
+	// httpapi integration tests bind an in-memory one to otelnats's OpenFeature
+	// domain to stand in for the relay.
+	github.com/open-feature/go-sdk v1.17.2
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0
 	go.opentelemetry.io/otel v1.44.0
@@ -20,12 +29,9 @@ require (
 
 require (
 	github.com/antithesishq/antithesis-sdk-go v0.7.0-default-no-op // indirect
-	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
-	github.com/blang/semver v3.5.1+incompatible // indirect
-	github.com/bluele/gcache v0.0.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/diegoholiveira/jsonlogic/v3 v3.10.1 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -37,16 +43,13 @@ require (
 	github.com/nats-io/jwt/v2 v2.8.2 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/nikunjy/rules v1.5.0 // indirect
-	github.com/open-feature/go-sdk-contrib/providers/ofrep v0.1.7 // indirect
-	github.com/thomaspoignant/go-feature-flag/modules/core v0.7.2 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect

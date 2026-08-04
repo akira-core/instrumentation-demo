@@ -97,17 +97,32 @@ func (m *Manager) connectLoop(ctx context.Context) {
 			return
 		}
 
-		// Deliberately NO otelnats.WithTracingEnabled(...) here. That option
-		// pins a connection's tracing state at construction and, per the
-		// library's docs, means "no OpenFeature evaluation ever runs for it,
-		// no relay change reaches it" — which would silently disable the
-		// demo's headline capability: flipping otel-nats-tracing on the relay
-		// proxy and watching NATS spans appear/disappear without a restart.
-		// Left off, otelnats resolves the flag per operation, falling back to
-		// OTEL_NATS_TRACING_ENABLED whenever the relay has no opinion. The
-		// env-only kill switch OTEL_INSTRUMENTATION_GO_TRACING_ENABLED must
-		// also be truthy or no evaluation happens at all — both are set in
-		// deploy/base/backend.yaml.
+		// Deliberately NO otelnats.WithTracingEnabled(...) here, for a reason
+		// that changed in 0.8.0: the option and the environment variable
+		// OTEL_INSTRUMENTATION_GO_TRACING_ENABLED are now two spellings of one
+		// switch and are MUTUALLY EXCLUSIVE. Supplying both — even with the
+		// same value — makes this Connect return an error wrapping
+		// otelnats.ErrTracingConfigConflict, and the deployment sets that
+		// variable (deploy/base/backend.yaml), so passing the option here would
+		// turn every connect attempt into a permanent retry loop.
+		//
+		// It no longer pins anything: a connection carrying the option still
+		// reads the relay verdict on every operation. The demo's headline
+		// capability — flipping otel-nats-tracing on the relay and watching
+		// spans stop without a restart — survives either spelling. The
+		// environment is simply where this demo's gate lives.
+		//
+		// Tracing here is the conjunction of three tiers, and the relay is the
+		// only one that can change while this process runs — and it can only
+		// subtract:
+		//
+		//	OTEL_INSTRUMENTATION_GO_TRACING_ENABLED  (env, whole process)
+		//	&& OTEL_NATS_TRACING_ENABLED             (env, this module)
+		//	&& relay flag otel-nats-tracing          (per operation)
+		//
+		// Both variables are set truthy in deploy/base/backend.yaml. With
+		// either off, otelnats allocates only its passthrough implementation
+		// and no relay value can raise the answer.
 		conn, err := otelnats.Connect(m.url)
 		if err != nil {
 			m.logger.WarnContext(ctx, "natsflow: connect failed, retrying",
