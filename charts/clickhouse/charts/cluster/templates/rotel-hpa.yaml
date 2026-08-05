@@ -1,0 +1,63 @@
+{{- if .Values.rotel.enabled }}
+{{- $autoscaling := .Values.rotel.autoscaling | default dict }}
+{{- if dig "enabled" false $autoscaling }}
+{{- $min := dig "minReplicas" 1 $autoscaling | int }}
+{{- $max := dig "maxReplicas" 0 $autoscaling | int }}
+{{- if lt $max $min }}
+{{- fail (printf "rotel.autoscaling.maxReplicas (%d) is below minReplicas (%d)" $max $min) }}
+{{- end }}
+{{- $cpu := dig "targetCPUUtilizationPercentage" 0 $autoscaling | int }}
+{{- $mem := dig "targetMemoryUtilizationPercentage" 0 $autoscaling | int }}
+{{- $custom := dig "metrics" list $autoscaling }}
+{{- if not (or $cpu $mem $custom) }}
+{{- fail "rotel.autoscaling.enabled=true needs at least one of targetCPUUtilizationPercentage, targetMemoryUtilizationPercentage or metrics — an HPA with no metric never scales" }}
+{{- end }}
+{{- $requests := .Values.rotel.resources.requests | default dict }}
+{{- if and $cpu (not $requests.cpu) }}
+{{- fail "rotel.autoscaling.targetCPUUtilizationPercentage needs rotel.resources.requests.cpu — utilization is a percentage of the request" }}
+{{- end }}
+{{- if and $mem (not $requests.memory) }}
+{{- fail "rotel.autoscaling.targetMemoryUtilizationPercentage needs rotel.resources.requests.memory — utilization is a percentage of the request" }}
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "cluster.rotelName" . }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel
+  annotations:
+    {{- include "cluster.argocdAnnotations" "rotel" | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "cluster.rotelName" . }}
+  minReplicas: {{ $min }}
+  maxReplicas: {{ $max }}
+  metrics:
+    {{- if $cpu }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $cpu }}
+    {{- end }}
+    {{- if $mem }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $mem }}
+    {{- end }}
+    {{- with $custom }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with dig "behavior" dict $autoscaling }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

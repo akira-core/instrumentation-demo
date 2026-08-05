@@ -1,0 +1,105 @@
+# Local / kind profile — single-node friendly overrides for values.yaml
+# Usage:
+#   make install VALUES=values-local.yaml PASSWORD='localdev'
+#   # or: helm upgrade --install ... -f values.yaml -f values-local.yaml
+
+operator:
+  watchNamespaces: []
+  rbac:
+    namespaceScoped: true
+  operator:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi
+  metrics:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 96Mi
+
+cluster:
+  commonLabels:
+    environment: local
+
+  keeper:
+    ## Single Keeper is fine for local only — not for production HA
+    replicas: 1
+    antiAffinity: false
+    podTemplate:
+      topologyZoneKey: ""
+      nodeHostnameKey: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    persistence:
+      size: 5Gi
+
+  clickhouse:
+    replicas: 1
+    shards: 1
+    antiAffinity: false
+    podTemplate:
+      topologyZoneKey: ""
+      nodeHostnameKey: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      size: 10Gi
+    ## No extra users that require external Secrets on a bare kind cluster
+    settings:
+      extraConfig:
+        max_concurrent_queries: 50
+        max_server_memory_usage_to_ram_ratio: 0.9
+        ## Must be high enough that pool_size * concurrency_ratio >=
+        ## merge_tree.number_of_free_entries_in_pool_to_execute_mutation (20).
+        background_pool_size: 16
+        background_merges_mutations_concurrency_ratio: 2
+        mark_cache_size: 536870912
+        uncompressed_cache_size: 1073741824
+        logger:
+          level: information
+          console: 1
+      ## Map-merge: set reporter to null to drop the production default user
+      ## (Helm merges maps; {} does not remove keys from values.yaml).
+      extraUsersConfig:
+        users:
+          reporter: null
+    containerTemplate:
+      env: []
+    clusterSecret:
+      enabled: false
+
+  rotel:
+    enabled: true
+    ## clusterAllReplicas() re-auths as default without the client password on a
+    ## single-node CHI; skip the retention hook locally (DDL createSchema is enough).
+    manageTtl: false
+    exporter:
+      ## Single replica → Atomic + MergeTree is enough locally
+      engine: MergeTree
+      cluster: default
+      databaseEngine: Atomic
+      ttl: 24h
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi

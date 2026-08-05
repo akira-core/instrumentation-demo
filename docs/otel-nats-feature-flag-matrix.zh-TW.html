@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>otel-nats 功能旗標閘門與回退矩陣 — 測試證據報告（繁中）</title>
+  <style>
+    :root {
+      --bg:#0f1419; --surface:#1a2332; --surface-2:#243044; --border:#2d3a4f;
+      --text:#e7ecf3; --muted:#9aa8bc; --accent:#3d9cf0; --ok:#3ecf8e; --fail:#e85d5d;
+      --code-bg:#0b1016; --mono:"JetBrains Mono","SF Mono",ui-monospace,monospace;
+      --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--sans); background:var(--bg); color:var(--text); line-height:1.65; }
+    .layout { display:grid; grid-template-columns:280px 1fr; min-height:100vh; }
+    nav { position:sticky; top:0; height:100vh; overflow:auto; background:var(--surface); border-right:1px solid var(--border); padding:1.25rem 1rem 2rem; }
+    nav .brand { color:var(--accent); font-weight:700; font-size:.95rem; }
+    nav .sub { color:var(--muted); font-size:.75rem; margin:.25rem 0 1rem; }
+    nav h4 { margin:1rem 0 .35rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+    nav ul { list-style:none; padding:0; margin:0; }
+    nav a { display:block; color:var(--muted); text-decoration:none; font-size:.78rem; padding:.3rem .45rem; border-radius:4px; }
+    nav a:hover { background:var(--surface-2); color:var(--text); }
+    main { max-width:960px; padding:2rem 2.25rem 4rem; }
+    h1 { font-size:1.55rem; margin:0 0 .5rem; line-height:1.35; }
+    h2 { margin-top:2.5rem; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+    h3 { margin:.25rem 0; font-size:1.05rem; }
+    h4 { margin:1rem 0 .35rem; color:var(--muted); font-size:.85rem; }
+    .lead { color:var(--muted); }
+    .stats { display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0 1.5rem; }
+    .stat { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:.75rem 1rem; min-width:140px; }
+    .stat b { display:block; font-size:1.4rem; }
+    .stat span { color:var(--muted); font-size:.8rem; }
+    .case { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.15rem 1.25rem; margin:1rem 0 1.5rem; }
+    .meta { color:var(--muted); font-size:.8rem; margin:.2rem 0 .6rem; }
+    .badge { display:inline-block; font-size:.72rem; font-weight:700; padding:.15rem .45rem; border-radius:999px; vertical-align:middle; }
+    .badge.ok { background:rgba(62,207,142,.15); color:var(--ok); border:1px solid rgba(62,207,142,.35); }
+    .badge.fail { background:rgba(232,93,93,.15); color:var(--fail); border:1px solid rgba(232,93,93,.35); }
+    pre.code { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.75rem .9rem; overflow:auto; font-family:var(--mono); font-size:.78rem; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+    table { width:100%; border-collapse:collapse; font-size:.88rem; margin:1rem 0; }
+    th, td { border:1px solid var(--border); padding:.45rem .55rem; text-align:left; vertical-align:top; }
+    th { background:var(--surface-2); }
+    code { font-family:var(--mono); font-size:.85em; color:#9cd1ff; }
+    .callout { background:var(--surface-2); border-left:3px solid var(--accent); padding:.75rem 1rem; margin:1rem 0; border-radius:0 8px 8px 0; }
+    footer { color:var(--muted); font-size:.8rem; margin-top:3rem; }
+    @media (max-width:900px) { .layout { grid-template-columns:1fr; } nav { position:relative; height:auto; } }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav>
+    <div class="brand">otel-nats flag matrix</div>
+    <div class="sub">閘門 / 回退 · 逐步設定 · 證據 · zh-TW</div>
+    <h4>總覽</h4>
+    <a href="#overview">報告說明</a>
+    <a href="#ladder">階梯模型</a>
+    <a href="#baseline">叢集基準設定</a>
+    <a href="#summary-table">結果總表</a>
+    <h4>單元 · local</h4>
+    <ul><li><a href="#unit-L01"><code>L01</code> 全未設定 → 關閉（模組預設 false）</a></li>
+<li><a href="#unit-L02"><code>L02</code> 僅 master=true → 仍關閉（veto 不是啟</a></li>
+<li><a href="#unit-L03"><code>L03</code> 僅 module env=true → 開啟（maste</a></li>
+<li><a href="#unit-L04"><code>L04</code> WithTracingEnabled(true)、env</a></li>
+<li><a href="#unit-L05"><code>L05</code> WithTracingEnabled(false)、en</a></li>
+<li><a href="#unit-L06"><code>L06</code> env=false 勝過 option=true → 關</a></li>
+<li><a href="#unit-L07"><code>L07</code> env=true 勝過 option=false → 開</a></li>
+<li><a href="#unit-L08"><code>L08</code> master env 否決：module 與 optio</a></li>
+<li><a href="#unit-L09"><code>L09</code> module env 真值 token「1」→ 開啟</a></li>
+<li><a href="#unit-L10"><code>L10</code> module env 假值 token「off」→ 關閉</a></li></ul>
+    <h4>單元 · invalid</h4>
+    <ul><li><a href="#unit-E01"><code>E01</code> module env 空字串 → 建構錯誤</a></li>
+<li><a href="#unit-E02"><code>E02</code> module env 無法辨識「enabled」→ 建構</a></li></ul>
+    <h4>單元 · relay</h4>
+    <ul><li><a href="#unit-R01"><code>R01</code> relay 啟用 module、env 沉默 → 開啟（</a></li>
+<li><a href="#unit-R02"><code>R02</code> relay 關閉 module、env=true → 關</a></li>
+<li><a href="#unit-R03"><code>R03</code> option C：env=false + relay=t</a></li>
+<li><a href="#unit-R04"><code>R04</code> option C 翻轉：env=false + rela</a></li>
+<li><a href="#unit-R05"><code>R05</code> relay master 否決：module relay</a></li>
+<li><a href="#unit-R06"><code>R06</code> master env 否決勝過 enabling rel</a></li>
+<li><a href="#unit-R07"><code>R07</code> option=true 仍服從 relay 關閉 → 關</a></li>
+<li><a href="#unit-R08"><code>R08</code> option=false 仍服從 relay 開啟 → </a></li>
+<li><a href="#unit-R09"><code>R09</code> provider 存在但無 key + env=fals</a></li>
+<li><a href="#unit-R10"><code>R10</code> 無 provider + module env=true</a></li></ul>
+    <h4>叢集 live</h4>
+    <ul><li><a href="#live-C1"><code>C1</code> option C 預設：env=false + ConfigMa</a></li>
+<li><a href="#live-C2"><code>C2</code> ConfigMap → disabled：HTTP 成功、NAT</a></li>
+<li><a href="#live-C3"><code>C3</code> ConfigMap → enabled：NATS span 恢復</a></li></ul>
+    <h4>重跑</h4>
+    <a href="#repro">如何重跑證據</a>
+  </nav>
+  <main>
+    <h1>otel-nats 功能旗標閘門與回退組合<br/>測試證據報告</h1>
+    <p class="lead">每個案例都記錄：<strong>你改了什麼設定</strong> → <strong>預期</strong> → <strong>API / 測試 / ClickHouse 證據</strong> → <strong>是否通過</strong>。
+    證據時間（UTC）：單元 <code>2026-08-05T13:57:57Z</code> · 叢集 <code>2026-08-05T14:07:49Z</code>。</p>
+
+    <div class="stats" id="overview">
+      <div class="stat"><b>22/22</b><span>單元矩陣通過</span></div>
+      <div class="stat"><b>3/3</b><span>叢集實測通過</span></div>
+      <div class="stat"><b>0</b><span>單元失敗數</span></div>
+      <div class="stat"><b>docker-desktop</b><span>kubectl context</span></div>
+    </div>
+
+    <div class="callout">
+      <strong>證據類型</strong><br/>
+      · <em>單元矩陣</em>：Go 測試呼叫 <code>otelnats.ConnectWithOptions</code> + in-memory OpenFeature named provider，讀 <code>conn.TracingEnabled()</code>。原始 JSON：<code>docs/evidence/matrix-unit.json</code>。<br/>
+      · <em>叢集實測</em>：真實 GOFF + ConfigMap volume + backend zero-code。每步保留 relay eval / demo API / ClickHouse 輸出。<br/>
+      · 未另附 Grafana 截圖；ClickHouse span 列即「有沒有 NATS instrumentation」的客觀證據。
+    </div>
+
+    <h2 id="ladder">階梯模型</h2>
+    <pre class="code">優先序（先有意見者勝出）：
+  relay  &gt;  env  &gt;  option (WithTracingEnabled)  &gt;  hardcoded default
+
+合成：
+  tracing = master &amp;&amp; moduleTracing
+
+  master  : relay key otel-instrumentation-go-tracing
+            | OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+            | default true（否決開關，truthy 不會「打開」任何模組）
+  module  : relay key otel-nats-tracing
+            | OTEL_NATS_TRACING_ENABLED
+            | WithTracingEnabled
+            | default false
+
+OpenFeature domain：otel-instrumentation-go
+（named provider；只裝 default slot 不算 library relay）</pre>
+
+    <h2 id="baseline">叢集基準設定（option C）</h2>
+    <p>Live 測試期間 <code>deployment/backend</code> 環境（只改 ConfigMap、不重啟 backend）：</p>
+    <pre class="code">PORT=8080
+NATS_URL=nats://nats:4222
+OTEL_EXPORTER_OTLP_ENDPOINT=http://rotel:4318
+OTEL_SERVICE_NAME=demo-backend
+CORS_ALLOWED_ORIGIN=*
+OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
+OTEL_NATS_TRACING_ENABLED=false
+OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=http://relay-proxy:1031
+OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s</pre>
+    <p class="meta">ConfigMap volume 刷新約 60–75s；relay pollingInterval=1s；provider poll=2s</p>
+
+    <h2 id="summary-table">結果總表</h2>
+    <h3>單元矩陣</h3>
+    <table>
+      <thead><tr><th>ID</th><th>標題</th><th>預期</th><th>實際</th><th>結果</th></tr></thead>
+      <tbody>
+      <tr><td><a href='#unit-L01'><code>L01</code></a></td><td>全未設定 → 關閉（模組預設 false）</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-L02'><code>L02</code></a></td><td>僅 master=true → 仍關閉（veto 不是啟用開關）</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-L03'><code>L03</code></a></td><td>僅 module env=true → 開啟（master 預設 true）</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-L04'><code>L04</code></a></td><td>WithTracingEnabled(true)、env 沉默 → 開啟</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-L05'><code>L05</code></a></td><td>WithTracingEnabled(false)、env 沉默 → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-L06'><code>L06</code></a></td><td>env=false 勝過 option=true → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-L07'><code>L07</code></a></td><td>env=true 勝過 option=false → 開啟</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-L08'><code>L08</code></a></td><td>master env 否決：module 與 option 皆 on → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-L09'><code>L09</code></a></td><td>module env 真值 token「1」→ 開啟</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-L10'><code>L10</code></a></td><td>module env 假值 token「off」→ 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-E01'><code>E01</code></a></td><td>module env 空字串 → 建構錯誤</td><td>ERR</td><td>ERR</td><td>✅</td></tr><tr><td><a href='#unit-E02'><code>E02</code></a></td><td>module env 無法辨識「enabled」→ 建構錯誤</td><td>ERR</td><td>ERR</td><td>✅</td></tr><tr><td><a href='#unit-R01'><code>R01</code></a></td><td>relay 啟用 module、env 沉默 → 開啟（可補上部署未開的 tracing）</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-R02'><code>R02</code></a></td><td>relay 關閉 module、env=true → 關閉（relay 雙向權威）</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R03'><code>R03</code></a></td><td>option C：env=false + relay=true → 開啟（本 demo 預設姿勢）</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-R04'><code>R04</code></a></td><td>option C 翻轉：env=false + relay=false → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R05'><code>R05</code></a></td><td>relay master 否決：module relay on + option true → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R06'><code>R06</code></a></td><td>master env 否決勝過 enabling relay → 關閉</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R07'><code>R07</code></a></td><td>option=true 仍服從 relay 關閉 → 關閉（不 pin）</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R08'><code>R08</code></a></td><td>option=false 仍服從 relay 開啟 → 開啟</td><td>ON</td><td>ON</td><td>✅</td></tr><tr><td><a href='#unit-R09'><code>R09</code></a></td><td>provider 存在但無 key + env=false + option=true → env 勝 option</td><td>OFF</td><td>OFF</td><td>✅</td></tr><tr><td><a href='#unit-R10'><code>R10</code></a></td><td>無 provider + module env=true → 僅 env 路徑開啟</td><td>ON</td><td>ON</td><td>✅</td></tr>
+      </tbody>
+    </table>
+
+    <h3>叢集實測</h3>
+    <table>
+      <thead><tr><th>ID</th><th>標題</th><th>relay value</th><th>NATS</th><th>HTTP</th><th>結果</th></tr></thead>
+      <tbody>
+      <tr><td><a href='#live-C1'><code>C1</code></a></td><td>option C 預設：env=false + ConfigMap enabled → 有 NATS span</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C2'><code>C2</code></a></td><td>ConfigMap → disabled：HTTP 成功、NATS span=0</td><td>False</td><td>0</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C3'><code>C3</code></a></td><td>ConfigMap → enabled：NATS span 恢復</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="unit">單元矩陣詳情</h2>
+    
+    <article class="case" id="unit-L01">
+      <header>
+        <h3><code>L01</code> 全未設定 → 關閉（模組預設 false） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 1 ms · 2026-08-05T13:57:57.289941Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 清除 OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+2. 清除 OTEL_NATS_TRACING_ENABLED
+3. 不綁定 OpenFeature named provider
+4. 不傳 WithTracingEnabled</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L02">
+      <header>
+        <h3><code>L02</code> 僅 master=true → 仍關閉（veto 不是啟用開關） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.291464Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 設定 OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=true
+2. 清除 OTEL_NATS_TRACING_ENABLED
+3. 無 relay / 無 option</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&#x27;true&#x27;
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&quot;true&quot;
+UNSET OTEL_NATS_TRACING_ENABLED
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L03">
+      <header>
+        <h3><code>L03</code> 僅 module env=true → 開啟（master 預設 true） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.29215Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 清除 master env
+2. 設定 OTEL_NATS_TRACING_ENABLED=true</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;true&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;true&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L04">
+      <header>
+        <h3><code>L04</code> WithTracingEnabled(true)、env 沉默 → 開啟 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.292778Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 清除 module / master env
+2. ConnectWithOptions(..., WithTracingEnabled(true))</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled(True)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option WithTracingEnabled(true)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L05">
+      <header>
+        <h3><code>L05</code> WithTracingEnabled(false)、env 沉默 → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.29343Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 清除 module / master env
+2. ConnectWithOptions(..., WithTracingEnabled(false))</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled(False)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option WithTracingEnabled(false)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L06">
+      <header>
+        <h3><code>L06</code> env=false 勝過 option=true → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.293918Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=false
+2. WithTracingEnabled(true)</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;false&#x27;
+WithTracingEnabled(True)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;false&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option WithTracingEnabled(true)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L07">
+      <header>
+        <h3><code>L07</code> env=true 勝過 option=false → 開啟 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.294358Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=true
+2. WithTracingEnabled(false)</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;true&#x27;
+WithTracingEnabled(False)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;true&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option WithTracingEnabled(false)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L08">
+      <header>
+        <h3><code>L08</code> master env 否決：module 與 option 皆 on → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.294742Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=false
+2. OTEL_NATS_TRACING_ENABLED=true
+3. WithTracingEnabled(true)</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&#x27;false&#x27;
+OTEL_NATS_TRACING_ENABLED=&#x27;true&#x27;
+WithTracingEnabled(True)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&quot;false&quot;
+SET OTEL_NATS_TRACING_ENABLED=&quot;true&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option WithTracingEnabled(true)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L09">
+      <header>
+        <h3><code>L09</code> module env 真值 token「1」→ 開啟 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.295155Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=1</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;1&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;1&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-L10">
+      <header>
+        <h3><code>L10</code> module env 假值 token「off」→ 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：local · 耗時 0 ms · 2026-08-05T13:57:57.296136Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=off</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;off&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;off&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-E01">
+      <header>
+        <h3><code>E01</code> module env 空字串 → 建構錯誤 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-05T13:57:57.29646Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. export OTEL_NATS_TRACING_ENABLED=&quot;&quot;</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">建構錯誤 (ErrInvalidFlagValue)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=&quot;&quot; (accepted: 1,true,yes,on / 0,false,no,off)
+expect_error=true → pass=true</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=&quot;&quot; (accepted: 1,true,yes,on / 0,false,no,off)
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-E02">
+      <header>
+        <h3><code>E02</code> module env 無法辨識「enabled」→ 建構錯誤 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-05T13:57:57.296485Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=enabled</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;enabled&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">建構錯誤 (ErrInvalidFlagValue)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;enabled&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=&quot;enabled&quot; (accepted: 1,true,yes,on / 0,false,no,off)
+expect_error=true → pass=true</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=&quot;enabled&quot; (accepted: 1,true,yes,on / 0,false,no,off)
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R01">
+      <header>
+        <h3><code>R01</code> relay 啟用 module、env 沉默 → 開啟（可補上部署未開的 tracing） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.296507Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 清除 env
+2. SetNamedProviderAndWait(FlagDomain) 且 otel-nats-tracing=true
+3. 先裝 provider 再 Connect</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled=(none)
+relay_mode=named-domain
+relay otel-nats-tracing=True</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+relay otel-nats-tracing=true
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option: (none)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R02">
+      <header>
+        <h3><code>R02</code> relay 關閉 module、env=true → 關閉（relay 雙向權威） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.296853Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=true
+2. relay otel-nats-tracing=false</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;true&#x27;
+WithTracingEnabled=(none)
+relay_mode=named-domain
+relay otel-nats-tracing=False</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;true&quot;
+relay otel-nats-tracing=false
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R03">
+      <header>
+        <h3><code>R03</code> option C：env=false + relay=true → 開啟（本 demo 預設姿勢） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.29712Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
+2. OTEL_NATS_TRACING_ENABLED=false
+3. relay otel-nats-tracing=true</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&#x27;1&#x27;
+OTEL_NATS_TRACING_ENABLED=&#x27;false&#x27;
+WithTracingEnabled=(none)
+relay_mode=named-domain
+relay otel-nats-tracing=True</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&quot;1&quot;
+SET OTEL_NATS_TRACING_ENABLED=&quot;false&quot;
+relay otel-nats-tracing=true
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option: (none)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R04">
+      <header>
+        <h3><code>R04</code> option C 翻轉：env=false + relay=false → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.297507Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_NATS_TRACING_ENABLED=false
+2. relay otel-nats-tracing=false</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;false&#x27;
+WithTracingEnabled=(none)
+relay_mode=named-domain
+relay otel-nats-tracing=False</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;false&quot;
+relay otel-nats-tracing=false
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R05">
+      <header>
+        <h3><code>R05</code> relay master 否決：module relay on + option true → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.297906Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. relay otel-instrumentation-go-tracing=false
+2. relay otel-nats-tracing=true
+3. WithTracingEnabled(true)</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled(True)
+relay_mode=named-domain
+relay otel-instrumentation-go-tracing=False
+relay otel-nats-tracing=True</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+relay otel-instrumentation-go-tracing=false
+relay otel-nats-tracing=true
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option WithTracingEnabled(true)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R06">
+      <header>
+        <h3><code>R06</code> master env 否決勝過 enabling relay → 關閉 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.298375Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=false
+2. relay otel-nats-tracing=true</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&#x27;false&#x27;
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled=(none)
+relay_mode=named-domain
+relay otel-nats-tracing=True</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=&quot;false&quot;
+UNSET OTEL_NATS_TRACING_ENABLED
+relay otel-nats-tracing=true
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option: (none)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R07">
+      <header>
+        <h3><code>R07</code> option=true 仍服從 relay 關閉 → 關閉（不 pin） <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.298759Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. WithTracingEnabled(true)
+2. relay otel-nats-tracing=false</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled(True)
+relay_mode=named-domain
+relay otel-nats-tracing=False</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+relay otel-nats-tracing=false
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option WithTracingEnabled(true)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R08">
+      <header>
+        <h3><code>R08</code> option=false 仍服從 relay 開啟 → 開啟 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.299139Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. WithTracingEnabled(false)
+2. relay otel-nats-tracing=true</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=(unset)
+WithTracingEnabled(False)
+relay_mode=named-domain
+relay otel-nats-tracing=True</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+UNSET OTEL_NATS_TRACING_ENABLED
+relay otel-nats-tracing=true
+OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect
+option WithTracingEnabled(false)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R09">
+      <header>
+        <h3><code>R09</code> provider 存在但無 key + env=false + option=true → env 勝 option <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.299524Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. 綁定 named provider 但不定義任何 flag key
+2. OTEL_NATS_TRACING_ENABLED=false
+3. WithTracingEnabled(true)</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;false&#x27;
+WithTracingEnabled(True)
+relay_mode=empty-provider</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing OFF (conn.TracingEnabled() == false)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;false&quot;
+OpenFeature FlagDomain → empty InMemoryProvider (keys absent)
+option WithTracingEnabled(true)
+conn.TracingEnabled() = false (expect false)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=False
+pass: True</pre>
+    </article>
+
+    <article class="case" id="unit-R10">
+      <header>
+        <h3><code>R10</code> 無 provider + module env=true → 僅 env 路徑開啟 <span class="badge ok">通過</span></h3>
+        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-05T13:57:57.299932Z</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. FlagDomain 綁 NoopProvider
+2. OTEL_NATS_TRACING_ENABLED=1</pre>
+      <h4>② 實際套用設定</h4>
+      <pre class="code">OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=(unset)
+OTEL_NATS_TRACING_ENABLED=&#x27;1&#x27;
+WithTracingEnabled=(none)
+relay_mode=none</pre>
+      <h4>③ 預期</h4>
+      <pre class="code">tracing ON (conn.TracingEnabled() == true)</pre>
+      <h4>④ 證據（測試執行紀錄）</h4>
+      <pre class="code">UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+SET OTEL_NATS_TRACING_ENABLED=&quot;1&quot;
+OpenFeature FlagDomain → NoopProvider (no relay opinion)
+option: (none)
+conn.TracingEnabled() = true (expect true)
+RESULT: PASS</pre>
+      <h4>⑤ 結果</h4>
+      <pre class="code">got: TracingEnabled=True
+pass: True</pre>
+    </article>
+
+
+    <h2 id="live">叢集實測詳情</h2>
+    
+    <article class="case" id="live-C1">
+      <header>
+        <h3><code>C1</code> option C 預設：env=false + ConfigMap enabled → 有 NATS span <span class="badge ok">通過</span></h3>
+        <p class="meta">traceId=<code>b4ba70128760c34ae4bf15322ddaf167</code> · nats=1 · http=1</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」）
+2. kubectl apply ConfigMap demo-feature-flags（本案例的 defaultRule.variation）
+3. 等待約 75 秒（kubelet ConfigMap mount 刷新 + GOFF poll 1s + provider poll 2s）
+4. POST GOFF /v1/feature/otel-nats-tracing/eval 確認 relay 值
+5. POST /api/demo-trace 取得 traceId
+6. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;</pre>
+      <h4>② Relay eval API 回應</h4>
+      <pre class="code">{
+  &quot;trackEvents&quot;: true,
+  &quot;variationType&quot;: &quot;enabled&quot;,
+  &quot;failed&quot;: false,
+  &quot;version&quot;: &quot;&quot;,
+  &quot;reason&quot;: &quot;STATIC&quot;,
+  &quot;errorCode&quot;: &quot;&quot;,
+  &quot;value&quot;: true,
+  &quot;cacheable&quot;: true
+}</pre>
+      <h4>③ Demo API 回應</h4>
+      <pre class="code">{
+  &quot;traceId&quot;: &quot;b4ba70128760c34ae4bf15322ddaf167&quot;,
+  &quot;spanId&quot;: &quot;86a522769267ed10&quot;
+}</pre>
+      <h4>④ ClickHouse 查詢結果</h4>
+      <pre class="code">TraceId=b4ba70128760c34ae4bf15322ddaf167
+   ┌─SpanName────────────────┬─SpanKind─┐
+1. │ POST /api/demo-trace    │ Server   │
+2. │ send demo.trace.request │ Producer │
+   └─────────────────────────┴──────────┘
+nats_count=1
+http_count=1
+--- recent 15 ---
+    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+ 1. │ 2daca0a54b6d │ process demo.trace.reply   │ Consumer │
+ 2. │ 97ea4e4f4d85 │ send demo.trace.reply      │ Producer │
+ 3. │ 97ea4e4f4d85 │ process demo.trace.request │ Consumer │
+ 4. │ b4ba70128760 │ send demo.trace.request    │ Producer │
+ 5. │ 0b886256e5f5 │ HTTP POST                  │ Client   │
+ 6. │ b4ba70128760 │ POST /api/demo-trace       │ Server   │
+ 7. │ 681c3b67d56a │ process demo.trace.reply   │ Consumer │
+ 8. │ c558faf37dfb │ send demo.trace.reply      │ Producer │
+ 9. │ c558faf37dfb │ process demo.trace.request │ Consumer │
+10. │ 4f8675fbbf20 │ send demo.trace.request    │ Producer │
+11. │ c7543b98caa5 │ HTTP POST                  │ Client   │
+12. │ 4f8675fbbf20 │ POST /api/demo-trace       │ Server   │
+13. │ 5d440e79ec06 │ HTTP POST                  │ Client   │
+14. │ 85c3d30e7eb4 │ POST /api/demo-trace       │ Server   │
+15. │ a6e1e6471a05 │ process demo.trace.reply   │ Consumer │
+    └──────────────┴────────────────────────────┴──────────┘</pre>
+      <h4>⑤ 證據檔案（docs/evidence/）</h4>
+      <pre class="code">{
+  &quot;apply&quot;: &quot;live-step-c1-apply.txt&quot;,
+  &quot;relay&quot;: &quot;live-step-c1-relay.json&quot;,
+  &quot;api&quot;: &quot;live-step-c1-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-step-c1-clickhouse.txt&quot;
+}</pre>
+    </article>
+
+    <article class="case" id="live-C2">
+      <header>
+        <h3><code>C2</code> ConfigMap → disabled：HTTP 成功、NATS span=0 <span class="badge ok">通過</span></h3>
+        <p class="meta">traceId=<code>81be78258c3fa1f0409189b04904426d</code> · nats=0 · http=1</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」）
+2. kubectl apply ConfigMap demo-feature-flags（本案例的 defaultRule.variation）
+3. 等待約 75 秒（kubelet ConfigMap mount 刷新 + GOFF poll 1s + provider poll 2s）
+4. POST GOFF /v1/feature/otel-nats-tracing/eval 確認 relay 值
+5. POST /api/demo-trace 取得 traceId
+6. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;</pre>
+      <h4>② Relay eval API 回應</h4>
+      <pre class="code">{
+  &quot;trackEvents&quot;: true,
+  &quot;variationType&quot;: &quot;disabled&quot;,
+  &quot;failed&quot;: false,
+  &quot;version&quot;: &quot;&quot;,
+  &quot;reason&quot;: &quot;STATIC&quot;,
+  &quot;errorCode&quot;: &quot;&quot;,
+  &quot;value&quot;: false,
+  &quot;cacheable&quot;: true
+}</pre>
+      <h4>③ Demo API 回應</h4>
+      <pre class="code">{
+  &quot;traceId&quot;: &quot;81be78258c3fa1f0409189b04904426d&quot;,
+  &quot;spanId&quot;: &quot;60cfc14aef8c882e&quot;
+}</pre>
+      <h4>④ ClickHouse 查詢結果</h4>
+      <pre class="code">TraceId=81be78258c3fa1f0409189b04904426d
+   ┌─SpanName─────────────┬─SpanKind─┐
+1. │ POST /api/demo-trace │ Server   │
+   └──────────────────────┴──────────┘
+nats_count=0
+http_count=1</pre>
+      <h4>⑤ 證據檔案（docs/evidence/）</h4>
+      <pre class="code">{
+  &quot;apply&quot;: &quot;live-step-c2-apply.txt&quot;,
+  &quot;relay&quot;: &quot;live-step-c2-relay.json&quot;,
+  &quot;api&quot;: &quot;live-step-c2-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-step-c2-clickhouse.txt&quot;
+}</pre>
+    </article>
+
+    <article class="case" id="live-C3">
+      <header>
+        <h3><code>C3</code> ConfigMap → enabled：NATS span 恢復 <span class="badge ok">通過</span></h3>
+        <p class="meta">traceId=<code>102b25e8f42be31c0a7639092e06237b</code> · nats=1 · http=1</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」）
+2. kubectl apply ConfigMap demo-feature-flags（本案例的 defaultRule.variation）
+3. 等待約 75 秒（kubelet ConfigMap mount 刷新 + GOFF poll 1s + provider poll 2s）
+4. POST GOFF /v1/feature/otel-nats-tracing/eval 確認 relay 值
+5. POST /api/demo-trace 取得 traceId
+6. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;</pre>
+      <h4>② Relay eval API 回應</h4>
+      <pre class="code">{
+  &quot;trackEvents&quot;: true,
+  &quot;variationType&quot;: &quot;enabled&quot;,
+  &quot;failed&quot;: false,
+  &quot;version&quot;: &quot;&quot;,
+  &quot;reason&quot;: &quot;STATIC&quot;,
+  &quot;errorCode&quot;: &quot;&quot;,
+  &quot;value&quot;: true,
+  &quot;cacheable&quot;: true
+}</pre>
+      <h4>③ Demo API 回應</h4>
+      <pre class="code">{
+  &quot;traceId&quot;: &quot;102b25e8f42be31c0a7639092e06237b&quot;,
+  &quot;spanId&quot;: &quot;def0d5760d2e673b&quot;
+}</pre>
+      <h4>④ ClickHouse 查詢結果</h4>
+      <pre class="code">TraceId=102b25e8f42be31c0a7639092e06237b
+   ┌─SpanName────────────────┬─SpanKind─┐
+1. │ POST /api/demo-trace    │ Server   │
+2. │ send demo.trace.request │ Producer │
+   └─────────────────────────┴──────────┘
+nats_count=1
+http_count=1</pre>
+      <h4>⑤ 證據檔案（docs/evidence/）</h4>
+      <pre class="code">{
+  &quot;apply&quot;: &quot;live-step-c3-apply.txt&quot;,
+  &quot;relay&quot;: &quot;live-step-c3-relay.json&quot;,
+  &quot;api&quot;: &quot;live-step-c3-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-step-c3-clickhouse.txt&quot;
+}</pre>
+    </article>
+
+
+    <h2 id="repro">如何重跑證據</h2>
+    <pre class="code"># 1) 單元矩陣 → docs/evidence/matrix-unit.json
+cd backend &amp;&amp; go test ./internal/flagmatrix/ -v -count=1
+
+# 2) 叢集 live 證據（需 demo namespace）
+# 逐步：apply ConfigMap → wait 75s → curl relay eval → curl demo-trace → clickhouse
+# 或：
+./docs/scripts/capture-live-evidence.sh
+
+# 3) 重產本 HTML
+python3 docs/scripts/render-flag-matrix-html.py
+
+# 瀏覽
+open docs/otel-nats-feature-flag-matrix.zh-TW.html</pre>
+
+    <footer>
+      證據目錄：<code>docs/evidence/</code><br/>
+      函式庫文件：<code>third_party/instrumentation-go/docs/feature-flags.zh-TW.md</code><br/>
+      矩陣測試：<code>backend/internal/flagmatrix/matrix_test.go</code>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

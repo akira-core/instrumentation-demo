@@ -1,0 +1,14 @@
+# Single-node kind cluster for the trace-propagation demo. Access to
+# in-cluster services (frontend, Grafana) is via `kubectl port-forward`
+# (see README.md), so no extraPortMappings/Ingress are needed.
+#
+# Cluster name is intentionally omitted here — pass it via kind's --name
+# (Makefile: CLUSTER_NAME / DEFAULT_CLUSTER_NAME) so any existing kind
+# cluster can be reused without editing this file.
+#
+# Create:   kind create cluster --name demo-trace --config deploy/kind-cluster.yaml
+# Teardown: kind delete cluster --name demo-trace
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

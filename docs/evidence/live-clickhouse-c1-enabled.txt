@@ -1,0 +1,8 @@
+TraceId={"traceId":"959badea02de6c83e182380833bfa555","spanId":"b3840aafe0dc7537"}
+
+959badea02de6c83e182380833bfa555
+--- spans ---
+--- nats_count ---
+0
+--- http_count ---
+0

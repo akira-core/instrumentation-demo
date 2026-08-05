@@ -1,0 +1,20 @@
+Chart:       relay-proxy (GO Feature Flag relay proxy)
+Repo:        https://charts.gofeatureflag.org/
+Chart ver:   1.55.1
+App ver:     v1.55.1
+
+Pulled with:
+  helm repo add go-feature-flag https://charts.gofeatureflag.org/
+  helm repo update go-feature-flag
+  helm pull go-feature-flag/relay-proxy --untar -d charts/
+
+Values:      deploy/values/relay-proxy.yaml
+Install as:  helm install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n demo
+             (release name must be "relay-proxy" so the Service resolves at relay-proxy:1031)
+
+Upgrading is an explicit re-pull + diff review, never automatic.
+
+Local patches (re-apply after any re-pull):
+  - templates/deployment.yaml — honor .Values.extraVolumes / .Values.extraVolumeMounts
+  - values.yaml — declare empty extraVolumes / extraVolumeMounts defaults
+  Reason: mount demo-feature-flags for GOFF kind: file retriever (no ConfigMap API RBAC).

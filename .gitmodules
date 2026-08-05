@@ -1,0 +1,8 @@
+[submodule "third_party/instrumentation-js"]
+	path = third_party/instrumentation-js
+	url = https://github.com/akira-core/instrumentation-js.git
+	branch = feat/otel-nats
+[submodule "third_party/instrumentation-go"]
+	path = third_party/instrumentation-go
+	url = https://github.com/akira-core/instrumentation-go.git
+	branch = feat/inprogress-openfeature

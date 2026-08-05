@@ -1,0 +1,43 @@
+# Flag definitions in GO Feature Flag's own format. The GOFF relay proxy mounts
+# this ConfigMap as a volume and reads flags.yaml via its file retriever
+# (deploy/values/relay-proxy.yaml) — no Kubernetes API access needed.
+#
+# Edit live during a demo — neither the relay proxy nor the backend restarts:
+#   kubectl edit configmap demo-feature-flags -n demo
+#
+# Library flags only. This demo does not evaluate application-level flags to
+# gate business behavior; the NATS round trip always runs on a successful
+# demo request.
+#
+#   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
+#                      application code involved. Under instrumentation-go's
+#                      ladder (relay > env > option > default) the relay is
+#                      authoritative in BOTH directions: it can disable tracing
+#                      the deployment left on and enable tracing the deployment
+#                      left off.
+#
+# Demo posture (option C): backend sets OTEL_NATS_TRACING_ENABLED=false and
+# OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1. Default variation below is
+# `enabled`, so out-of-the-box NATS spans appear because the relay enables what
+# the module environment left off. Flip to `disabled` to stop spans; flip back
+# to restore them — no redeploy.
+#
+# Latency is kubelet mount refresh + the relay's pollingInterval (1000 ms in
+# deploy/values/relay-proxy.yaml) + the backend provider's poll interval
+# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s) — a few seconds, not instant.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-feature-flags
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: demo-feature-flags
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+data:
+  flags.yaml: |
+    otel-nats-tracing:
+      variations:
+        enabled: true
+        disabled: false
+      defaultRule:
+        variation: enabled

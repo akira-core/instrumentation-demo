@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-08-05T14:07:49Z",
+  "cluster": "docker-desktop",
+  "namespace": "demo",
+  "backend_env": {
+    "OTEL_INSTRUMENTATION_GO_TRACING_ENABLED": "1",
+    "OTEL_NATS_TRACING_ENABLED": "false",
+    "OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT": "http://relay-proxy:1031",
+    "OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL": "2s"
+  },
+  "note": "ConfigMap volume 刷新約 60–75s；relay pollingInterval=1s；provider poll=2s",
+  "cases": [
+    {
+      "id": "C1",
+      "title": "option C 預設：env=false + ConfigMap enabled → 有 NATS span",
+      "pass": true,
+      "traceId": "b4ba70128760c34ae4bf15322ddaf167",
+      "api": {
+        "traceId": "b4ba70128760c34ae4bf15322ddaf167",
+        "spanId": "86a522769267ed10"
+      },
+      "relay_eval": {
+        "trackEvents": true,
+        "variationType": "enabled",
+        "failed": false,
+        "version": "",
+        "reason": "STATIC",
+        "errorCode": "",
+        "value": true,
+        "cacheable": true
+      },
+      "nats_count": 1,
+      "http_count": 1,
+      "clickhouse": "TraceId=b4ba70128760c34ae4bf15322ddaf167\n   ┌─SpanName────────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace    │ Server   │\n2. │ send demo.trace.request │ Producer │\n   └─────────────────────────┴──────────┘\nnats_count=1\nhttp_count=1\n--- recent 15 ---\n    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐\n 1. │ 2daca0a54b6d │ process demo.trace.reply   │ Consumer │\n 2. │ 97ea4e4f4d85 │ send demo.trace.reply      │ Producer │\n 3. │ 97ea4e4f4d85 │ process demo.trace.request │ Consumer │\n 4. │ b4ba70128760 │ send demo.trace.request    │ Producer │\n 5. │ 0b886256e5f5 │ HTTP POST                  │ Client   │\n 6. │ b4ba70128760 │ POST /api/demo-trace       │ Server   │\n 7. │ 681c3b67d56a │ process demo.trace.reply   │ Consumer │\n 8. │ c558faf37dfb │ send demo.trace.reply      │ Producer │\n 9. │ c558faf37dfb │ process demo.trace.request │ Consumer │\n10. │ 4f8675fbbf20 │ send demo.trace.request    │ Producer │\n11. │ c7543b98caa5 │ HTTP POST                  │ Client   │\n12. │ 4f8675fbbf20 │ POST /api/demo-trace       │ Server   │\n13. │ 5d440e79ec06 │ HTTP POST                  │ Client   │\n14. │ 85c3d30e7eb4 │ POST /api/demo-trace       │ Server   │\n15. │ a6e1e6471a05 │ process demo.trace.reply   │ Consumer │\n    └──────────────┴────────────────────────────┴──────────┘",
+      "files": {
+        "apply": "live-step-c1-apply.txt",
+        "relay": "live-step-c1-relay.json",
+        "api": "live-step-c1-api.json",
+        "clickhouse": "live-step-c1-clickhouse.txt"
+      }
+    },
+    {
+      "id": "C2",
+      "title": "ConfigMap → disabled：HTTP 成功、NATS span=0",
+      "pass": true,
+      "traceId": "81be78258c3fa1f0409189b04904426d",
+      "api": {
+        "traceId": "81be78258c3fa1f0409189b04904426d",
+        "spanId": "60cfc14aef8c882e"
+      },
+      "relay_eval": {
+        "trackEvents": true,
+        "variationType": "disabled",
+        "failed": false,
+        "version": "",
+        "reason": "STATIC",
+        "errorCode": "",
+        "value": false,
+        "cacheable": true
+      },
+      "nats_count": 0,
+      "http_count": 1,
+      "clickhouse": "TraceId=81be78258c3fa1f0409189b04904426d\n   ┌─SpanName─────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace │ Server   │\n   └──────────────────────┴──────────┘\nnats_count=0\nhttp_count=1",
+      "files": {
+        "apply": "live-step-c2-apply.txt",
+        "relay": "live-step-c2-relay.json",
+        "api": "live-step-c2-api.json",
+        "clickhouse": "live-step-c2-clickhouse.txt"
+      }
+    },
+    {
+      "id": "C3",
+      "title": "ConfigMap → enabled：NATS span 恢復",
+      "pass": true,
+      "traceId": "102b25e8f42be31c0a7639092e06237b",
+      "api": {
+        "traceId": "102b25e8f42be31c0a7639092e06237b",
+        "spanId": "def0d5760d2e673b"
+      },
+      "relay_eval": {
+        "trackEvents": true,
+        "variationType": "enabled",
+        "failed": false,
+        "version": "",
+        "reason": "STATIC",
+        "errorCode": "",
+        "value": true,
+        "cacheable": true
+      },
+      "nats_count": 1,
+      "http_count": 1,
+      "clickhouse": "TraceId=102b25e8f42be31c0a7639092e06237b\n   ┌─SpanName────────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace    │ Server   │\n2. │ send demo.trace.request │ Producer │\n   └─────────────────────────┴──────────┘\nnats_count=1\nhttp_count=1",
+      "files": {
+        "apply": "live-step-c3-apply.txt",
+        "relay": "live-step-c3-relay.json",
+        "api": "live-step-c3-api.json",
+        "clickhouse": "live-step-c3-clickhouse.txt"
+      }
+    }
+  ],
+  "passed": 3,
+  "total": 3
+}

@@ -1,0 +1,73 @@
+# Image is built with its baked-in defaults (VITE_BACKEND_URL=http://localhost:8080,
+# VITE_OTLP_ENDPOINT=http://localhost:4318, VITE_GRAFANA_BASE_URL=http://localhost:3000)
+# left as-is — those defaults already match the `kubectl port-forward` access
+# pattern this demo uses (see README.md), since the frontend is a browser app
+# that cannot resolve in-cluster Service DNS names.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/part-of: demo-trace-propagation-stack
+    spec:
+      containers:
+        - name: frontend
+          image: demo-frontend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

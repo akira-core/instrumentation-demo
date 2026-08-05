@@ -1,0 +1,18 @@
+Chart: nats
+Repository name: nats
+Repository URL: https://nats-io.github.io/k8s/helm/charts/
+Chart version: 2.14.2
+App version: 2.14.2
+Upstream source: https://github.com/nats-io/k8s (helm/charts/nats)
+
+Vendored via:
+  helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+  helm repo update nats
+  helm pull nats/nats --untar -d charts
+
+Pulled on: 2026-08-02 (UTC)
+
+Do not hand-edit files under this directory except SOURCE.txt itself; to
+upgrade, re-run `helm pull nats/nats --untar -d charts` with a new
+--version and update this file accordingly. Local customization belongs in
+deploy/values/nats.yaml, not in this vendored chart.

@@ -1,0 +1,26 @@
+# Patterns to ignore when building packages.
+#
+# A subchart is loaded as its own chart, so the umbrella's .helmignore does not
+# reach in here. Without this file, rendered output parked under templates/ is
+# read back as a template on the next render — Helm passes plain YAML through
+# untouched, so the manifest doubles every time and helm install applies the
+# stray copy for real. Keep this list in step with the root .helmignore.
+# VCS
+.git/
+.gitignore
+# Test / session artifacts
+*.png
+*.log
+dist/
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+# Rendered output
+rendered*.yaml
+out*.yaml
+manifest*.yaml
+*.rendered.yaml
+*.out.yaml

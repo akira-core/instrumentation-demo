@@ -1,0 +1,24 @@
+Chart:       victoria-metrics-single (VictoriaMetrics, single-node mode)
+Repo:        https://victoriametrics.github.io/helm-charts/
+Chart ver:   0.43.0
+App ver:     v1.148.0
+
+Pulled with:
+  helm repo add vm https://victoriametrics.github.io/helm-charts/
+  helm repo update vm
+  helm pull vm/victoria-metrics-single --untar -d charts/
+  mv charts/victoria-metrics-single charts/victoria-metrics
+
+(The directory is renamed to charts/victoria-metrics for brevity; the chart's own
+name stays "victoria-metrics-single", which is what the fullname template uses.)
+
+Values:      deploy/values/victoria-metrics.yaml
+Install as:  helm install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n demo
+
+Ingests two ways:
+  - OTLP protobuf push at /opentelemetry/v1/metrics on port 8428 (rotel forwards
+    application + collector-internal metrics here)
+  - Prometheus scraping of components that only expose /metrics, configured
+    inline via server.scrape in the values file
+
+Upgrading is an explicit re-pull + diff review, never automatic.

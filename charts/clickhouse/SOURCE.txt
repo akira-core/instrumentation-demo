@@ -1,0 +1,18 @@
+Chart: clickhouse
+Source: https://github.com/Marz32onE/clickhouse-aio (branch: feat/altinity-operator)
+Chart version: 0.2.0
+App version: 26.7.1.1315
+
+Umbrella chart bundling:
+  - altinity-clickhouse-operator 0.27.2 (subchart alias: operator)
+  - cluster 0.2.0 (local subchart: CHI/CHK CRs + Rotel + schema/TTL Jobs)
+
+Vendored via:
+  git clone -b feat/altinity-operator https://github.com/Marz32onE/clickhouse-aio.git
+  rsync into charts/clickhouse/ (excluding .git)
+
+Pulled on: 2026-08-02
+
+Do not hand-edit files under charts/clickhouse/ except SOURCE.txt itself.
+Local demo customization belongs in deploy/values/clickhouse.yaml.
+To upgrade, re-clone/pull the reference branch and re-rsync, then update this file.

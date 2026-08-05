@@ -1,0 +1,357 @@
+# =============================================================================
+# clickhouse — production defaults (small-business size)
+# =============================================================================
+# Topology (default):
+#   - Altinity ClickHouse Operator (namespace-scoped watch)
+#   - ClickHouse Keeper (CHK): 3 nodes (quorum)
+#   - ClickHouse (CHI): 1 shard × 3 replicas (HA, no over-sharding)
+#   - Storage: 200Gi data / 20Gi keeper per pod
+#   - Resources: CH 2–4 CPU / 8–16Gi RAM; Keeper 0.5–1 CPU / 1–2Gi RAM
+#
+# Single shard is deliberate: every replica holds the full dataset, so a query
+# against any node is complete. Sharding needs a Distributed table in front of
+# the otel_* tables — the rotel DDL tool does not create one, so raising
+# `shards` on its own silently returns one shard's worth of rows. See
+# "Scaling path" in the README before changing it.
+#
+# Prerequisites:
+#   - Kubernetes >= 1.25 (Altinity operator 0.16+)
+#   - StorageClass with volume expansion preferred (set storageClassName below)
+#
+# Install:
+#   make deps
+#   make install PASSWORD='...'
+#   # or two-step: make install-operator && make install-cluster PASSWORD='...'
+#
+# Quick start (upstream): https://github.com/Altinity/clickhouse-operator/blob/master/docs/quick_start.md
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Altinity ClickHouse Operator (subchart alias: operator)
+# Chart: altinity/altinity-clickhouse-operator (vendored)
+# Docs:  https://github.com/Altinity/clickhouse-operator/blob/master/docs/quick_start.md
+# -----------------------------------------------------------------------------
+operator:
+  enabled: true
+
+  ## Empty = watch the operator's own namespace (when not in kube-system).
+  ## Use [".*"] for all namespaces. Entries are regexps.
+  watchNamespaces: []
+
+  ## Operator Deployment
+  operator:
+    image:
+      registry: ""
+      repository: altinity/clickhouse-operator
+      ## Empty tag falls back to the subchart appVersion (0.27.2)
+      tag: "0.27.2"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  ## Metrics exporter sidecar
+  metrics:
+    enabled: true
+    image:
+      registry: ""
+      repository: altinity/metrics-exporter
+      tag: "0.27.2"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+  ## Namespace-scoped Role/RoleBinding instead of ClusterRole. The operator then
+  ## only reaches resources in its own namespace — install CHI/CHK there too.
+  rbac:
+    create: true
+    namespaceScoped: true
+
+  serviceAccount:
+    create: true
+
+  ## CRDs install via pre-install/pre-upgrade hooks (needs cluster-admin once)
+  crdHook:
+    enabled: true
+
+  ## Optional Grafana dashboards ConfigMaps
+  dashboards:
+    enabled: false
+
+  serviceMonitor:
+    enabled: false
+
+  ## Scheduling for the operator Pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Cluster subchart — CHK + CHI CRs
+# -----------------------------------------------------------------------------
+cluster:
+  enabled: true
+
+  ## Naming. Everything defaults to <release>-cluster.
+  ## nameOverride is install-time only (selector labels). fullnameOverride is safer.
+  nameOverride: ""
+  fullnameOverride: ""
+
+  commonLabels:
+    environment: production
+    app.kubernetes.io/part-of: clickhouse
+
+  # ---- ClickHouse Keeper (CHK) ----------------------------------------------
+  keeper:
+    enabled: true
+    replicas: 3
+    ## Internal cluster name inside the CHK (configuration.clusters[].name)
+    clusterName: cluster1
+    image:
+      registry: docker.io
+      repository: clickhouse/clickhouse-keeper
+      tag: "26.7.1.1315"
+      pullPolicy: IfNotPresent
+    persistence:
+      storageClassName: ""
+      accessModes:
+        - ReadWriteOnce
+      size: 20Gi
+      annotations: {}
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+
+    labels: {}
+    annotations: {}
+
+    ## When true (or nodeHostnameKey set), enforce one Keeper pod per node.
+    antiAffinity: true
+    podTemplate:
+      ## Empty = do not emit MaxNumberPerNode / zone spread (needed on single-node).
+      ## Production defaults pin one pod per host and prefer zone balance.
+      topologyZoneKey: topology.kubernetes.io/zone
+      nodeHostnameKey: kubernetes.io/hostname
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+      topologySpreadConstraints: []
+
+    ## Keeper settings (slash paths or nested maps — nested is flattened).
+    ## Empty uses chart defaults (logger, 4LW allow-list, prometheus :7000).
+    settings: {}
+
+  # ---- ClickHouse servers (CHI) ---------------------------------------------
+  clickhouse:
+    enabled: true
+    replicas: 3
+    shards: 1
+    ## remote_servers cluster name — must match rotel.exporter.cluster for
+    ## ReplicatedMergeTree / Replicated database engine.
+    clusterName: default
+    image:
+      registry: docker.io
+      repository: clickhouse/clickhouse-server
+      tag: "26.7.1.1315"
+      pullPolicy: IfNotPresent
+    persistence:
+      ## Chart always emits a data volumeClaimTemplate when true
+      enabled: true
+      storageClassName: ""
+      accessModes:
+        - ReadWriteOnce
+      size: 200Gi
+      annotations: {}
+      ## Name of the volumeClaimTemplate (also the volumeMount name)
+      volumeName: clickhouse-data
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "4"
+        memory: 16Gi
+
+    labels: {}
+    annotations: {}
+
+    ## One CH pod per node (ClickHouseAntiAffinity)
+    antiAffinity: true
+    antiAffinityScope: ClickHouseInstallation
+    podTemplate:
+      topologyZoneKey: topology.kubernetes.io/zone
+      nodeHostnameKey: kubernetes.io/hostname
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+      topologySpreadConstraints: []
+      volumes: []
+
+    defaultUser:
+      password: ""
+      existingSecret: ""
+      existingSecretKey: password
+      ## password | password_sha256_hex | password_double_sha1_hex
+      passwordType: password
+      autoGenerate: true
+
+    ## Reference to CHK. Auto-wired when keeper.enabled and name empty.
+    keeperClusterRef:
+      name: ""
+      ## Optional: CHK in another namespace
+      namespace: ""
+      ## replicas (default) | service
+      serviceType: ""
+    ## Explicit keeper host overrides keeperClusterRef (e.g. external ensemble)
+    keeper:
+      host: ""
+      port: 2181
+
+    ## Inter-replica cluster secret (recommended for multi-replica)
+    clusterSecret:
+      enabled: true
+      secure: false
+      auto: true
+      value: ""
+      valueFrom:
+        secretKeyRef:
+          name: ""
+          key: secret
+
+    settings:
+      extraConfig:
+        max_concurrent_queries: 100
+        max_server_memory_usage_to_ram_ratio: 0.9
+        background_pool_size: 16
+        background_merges_mutations_concurrency_ratio: 2
+        mark_cache_size: 5368709120
+        uncompressed_cache_size: 8589934592
+        logger:
+          level: information
+          console: 1
+      ## Users / profiles (converted to Altinity configuration.users/profiles).
+      ## Passwords: use passwordSecret, plaintext password, or
+      ## password: {"@from_env": ENV_NAME} with containerTemplate.env secretKeyRef.
+      extraUsersConfig:
+        profiles:
+          readonly_user:
+            max_rows_to_read: 1000000000
+            max_bytes_to_read: 100000000000
+            max_rows_to_group_by: 1000000
+            group_by_overflow_mode: any
+            max_rows_to_sort: 1000000
+            max_bytes_to_sort: 1000000000
+            max_result_rows: 100000
+            max_result_bytes: 100000000
+            result_overflow_mode: break
+            max_execution_time: 600
+            min_execution_speed: 1000000
+            timeout_before_checking_execution_speed: 15
+            max_columns_to_read: 25
+            max_temporary_columns: 100
+            max_temporary_non_const_columns: 50
+            max_subquery_depth: 2
+            max_pipeline_depth: 25
+            max_ast_depth: 50
+            max_ast_elements: 100
+            max_sessions_for_user: 4
+            readonly: 1
+        users:
+          reporter:
+            password:
+              "@from_env": CH_REPORTER_PASSWORD
+              "@hide_in_preprocessed": true
+            profile: readonly_user
+            networks:
+              ip: "::/0"
+            grants:
+              query:
+                - GRANT SELECT ON otel.otel_traces
+                - GRANT SELECT ON otel.otel_logs
+
+    ## Env for ClickHouse containers. Used to resolve @from_env passwords to
+    ## secretKeyRef for the Altinity operator (which does not support @from_env).
+    containerTemplate:
+      env:
+        - name: CH_REPORTER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: reporter-ch-password
+              key: password
+
+    additionalPorts: []
+
+    ## Client ClusterIP Service (CHI serviceTemplate). Prefer this over the
+    ## operator's default service for in-cluster Grafana / BI clients.
+    service:
+      enabled: true
+      name: ""
+      annotations: {}
+      sessionAffinity: ""
+
+  # ---- Rotel OTLP collector -------------------------------------------------
+  rotel:
+    enabled: true
+    replicas: 1
+    image:
+      registry: docker.io
+      repository: streamfold/rotel
+      tag: "v0.2.2"
+      pullPolicy: IfNotPresent
+    ddlImage:
+      registry: docker.io
+      repository: streamfold/rotel-clickhouse-ddl
+      tag: "v0.2.2"
+      pullPolicy: IfNotPresent
+    telemetry:
+      traces: true
+      logs: true
+      metrics: false
+    logFormat: json
+    internalMetrics:
+      enabled: false
+      endpoint: ""
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 75
+    podLabels: {}
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    jobs:
+      podLabels: {}
+      podAnnotations: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+    exporter:
+      engine: ReplicatedMergeTree
+      ## Must match clickhouse.clusterName
+      cluster: default
+      databaseEngine: Replicated
+      ttl: 168h
+
+  # ---- TLS (optional; cert-manager Certificates only — see README) ----------
+  tls:
+    enabled: false
+    required: true
+    createCertificates: true
+    issuerRef:
+      name: ""
+      kind: Issuer

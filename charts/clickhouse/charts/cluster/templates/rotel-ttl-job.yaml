@@ -1,0 +1,157 @@
+{{- if and .Values.rotel.enabled .Values.rotel.manageTtl }}
+{{- $chHost := include "cluster.clickhouseHost" . }}
+{{- $seconds := include "cluster.rotelTtlSeconds" . }}
+{{- $replicated := include "cluster.rotelDatabaseReplicated" . }}
+{{- $prefixes := list }}
+{{- range $g := (include "cluster.rotelExporterGroups" . | fromYamlArray) }}{{- $prefixes = append $prefixes $g.prefix }}{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cluster.rotelName" . }}-ttl
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel-ttl
+  annotations:
+    # Runs after the DDL job (weight 1): the DDL tool only writes TTL when it
+    # creates a table, so an existing table keeps whatever retention it was
+    # born with until this re-applies it.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    {{- include "cluster.rotelJobPodMetadata" (dict "root" . "component" "rotel-ttl") | nindent 4 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with include "cluster.rotelJobScheduling" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: apply-ttl
+          image: {{ include "cluster.image" .Values.clickhouse.image | quote }}
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          env:
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cluster.rotelPasswordSecretName" . | quote }}
+                  key: {{ include "cluster.rotelPasswordSecretKey" . | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              DB={{ .Values.rotel.exporter.database | quote }}
+              # Every prefix rotel writes under, so a per-signal tablePrefix is
+              # covered too. Prefixes can nest (otel, otel_app), which makes the
+              # same table match twice — sorted -u below drops the duplicate.
+              PREFIXES={{ join " " $prefixes | quote }}
+              SECONDS_TTL={{ $seconds | quote }}
+              {{- if $replicated }}
+              # The Replicated database engine puts the ALTER in its own DDL log
+              # for every member to replay. Adding ON CLUSTER on top would send
+              # each host a statement it is already going to receive.
+              ON_CLUSTER=""
+              {{- else }}
+              {{- with .Values.rotel.exporter.cluster }}
+              ON_CLUSTER="ON CLUSTER '{{ . }}'"
+              {{- else }}
+              ON_CLUSTER=""
+              {{- end }}
+              {{- end }}
+
+              ch() {
+                clickhouse-client --host {{ $chHost }} \
+                  --user {{ .Values.rotel.exporter.user }} --password "$CH_PASSWORD" \
+                  --query "$1"
+              }
+
+              until ch "SELECT 1" >/dev/null; do
+                echo "ClickHouse not ready yet; retrying in 5s"
+                sleep 5
+              done
+
+              # Only MergeTree-family tables carry a TTL. Views and the
+              # materialized view have none to modify.
+              TABLES=$(for PREFIX in $PREFIXES; do
+                         ch "SELECT name FROM system.tables
+                             WHERE database = '$DB'
+                               AND name LIKE '${PREFIX}\_%'
+                               AND engine LIKE '%MergeTree'"
+                       done | sort -u)
+
+              for T in $TABLES; do
+                # Reuse whatever expression the table already measures TTL from,
+                # so this keeps working if the DDL tool's schema changes.
+                EXPR=$(ch "SELECT extract(create_table_query, 'TTL (.*?) \+ toInterval')
+                           FROM system.tables WHERE database = '$DB' AND name = '$T'")
+
+                # A table created (or left) with ttl=0s carries no expression to
+                # reuse, which would otherwise make "0s" a one-way door. Fall
+                # back to the timestamp column the rotel DDL tool gives each
+                # table. Match the trace-id index before the plain traces
+                # suffix — its name ends with both.
+                if [ -z "$EXPR" ]; then
+                  case "$T" in
+                    *_traces_trace_id_ts) EXPR="toDateTime(Start)" ;;
+                    *_traces)             EXPR="toDateTime(Timestamp)" ;;
+                    *_logs)               EXPR="TimestampTime" ;;
+                    *)
+                      echo "$T: no TTL expression and no known timestamp column, skipping"
+                      continue
+                      ;;
+                  esac
+                fi
+
+                if [ "$SECONDS_TTL" = "0" ]; then
+                  echo "$T: removing TTL"
+                  ch "ALTER TABLE $DB.$T $ON_CLUSTER REMOVE TTL"
+                else
+                  echo "$T: TTL -> $EXPR + INTERVAL $SECONDS_TTL SECOND"
+                  ch "ALTER TABLE $DB.$T $ON_CLUSTER MODIFY TTL $EXPR + INTERVAL $SECONDS_TTL SECOND"
+                fi
+              done
+
+              # ON CLUSTER runs the ALTER once per shard and relies on
+              # replication to carry the metadata to the other replicas, so a
+              # replica that was restarting can be left behind. Read the result
+              # back from every replica and exit non-zero on a mismatch — the
+              # Job's backoffLimit then retries until it converges.
+              {{- if .Values.rotel.exporter.cluster }}
+              SOURCE="clusterAllReplicas('{{ .Values.rotel.exporter.cluster }}', system.tables)"
+              # uniqExact, not count: a host listed under several cluster
+              # definitions of the same name appears once per definition here
+              # but only once in clusterAllReplicas.
+              EXPECTED=$(ch "SELECT uniqExact(host_name) FROM system.clusters
+                             WHERE cluster = '{{ .Values.rotel.exporter.cluster }}'")
+              {{- else }}
+              SOURCE="system.tables"
+              EXPECTED=1
+              {{- end }}
+
+              if [ "$SECONDS_TTL" = "0" ]; then
+                MATCH="create_table_query NOT LIKE '% TTL %'"
+              else
+                MATCH="create_table_query LIKE '%toIntervalSecond($SECONDS_TTL)%'"
+              fi
+
+              FAILED=0
+              for T in $TABLES; do
+                OK=$(ch "SELECT count() FROM $SOURCE
+                         WHERE database = '$DB' AND name = '$T' AND $MATCH")
+                if [ "$OK" != "$EXPECTED" ]; then
+                  echo "$T: TTL applied on $OK/$EXPECTED replicas, retrying"
+                  FAILED=1
+                fi
+              done
+              [ "$FAILED" = "0" ] || exit 1
+              echo "TTL verified on all replicas"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+{{- end }}

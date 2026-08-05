@@ -1,0 +1,215 @@
+## Default values for the cluster subchart (Altinity CHI/CHK).
+## Parent chart overrides these for production small-business sizing.
+
+nameOverride: ""
+fullnameOverride: ""
+commonLabels: {}
+
+# ---------------------------------------------------------------------------
+# ClickHouse Keeper (ClickHouseKeeperInstallation)
+# ---------------------------------------------------------------------------
+keeper:
+  enabled: true
+  name: ""
+  replicas: 3
+  clusterName: cluster1
+  image:
+    registry: docker.io
+    repository: clickhouse/clickhouse-keeper
+    tag: "26.7.1.1315"
+    pullPolicy: IfNotPresent
+  persistence:
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 20Gi
+    annotations: {}
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  labels: {}
+  annotations: {}
+  antiAffinity: true
+  podTemplate:
+    topologyZoneKey: topology.kubernetes.io/zone
+    nodeHostnameKey: kubernetes.io/hostname
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+  settings: {}
+
+# ---------------------------------------------------------------------------
+# ClickHouse server (ClickHouseInstallation)
+# ---------------------------------------------------------------------------
+clickhouse:
+  enabled: true
+  name: ""
+  replicas: 3
+  shards: 1
+  clusterName: default
+  image:
+    registry: docker.io
+    repository: clickhouse/clickhouse-server
+    tag: "26.7.1.1315"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 200Gi
+    annotations: {}
+    volumeName: clickhouse-data
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+  labels: {}
+  annotations: {}
+  antiAffinity: true
+  antiAffinityScope: ClickHouseInstallation
+  podTemplate:
+    topologyZoneKey: topology.kubernetes.io/zone
+    nodeHostnameKey: kubernetes.io/hostname
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+    volumes: []
+  defaultUser:
+    password: ""
+    existingSecret: ""
+    existingSecretKey: password
+    passwordType: password
+    autoGenerate: true
+  keeperClusterRef:
+    name: ""
+    namespace: ""
+    serviceType: ""
+  keeper:
+    host: ""
+    port: 2181
+  clusterSecret:
+    enabled: true
+    secure: false
+    auto: true
+    value: ""
+    valueFrom:
+      secretKeyRef:
+        name: ""
+        key: secret
+  settings:
+    extraConfig: {}
+    extraUsersConfig: {}
+  additionalPorts: []
+  containerTemplate:
+    env: []
+    volumeMounts: []
+  service:
+    enabled: true
+    name: ""
+    annotations: {}
+    sessionAffinity: ""
+
+# ---------------------------------------------------------------------------
+# Rotel
+# ---------------------------------------------------------------------------
+rotel:
+  enabled: false
+  name: ""
+  replicas: 1
+  image:
+    registry: docker.io
+    repository: streamfold/rotel
+    tag: "v0.2.2"
+    pullPolicy: IfNotPresent
+  ddlImage:
+    registry: docker.io
+    repository: streamfold/rotel-clickhouse-ddl
+    tag: "v0.2.2"
+    pullPolicy: IfNotPresent
+  createSchema: true
+  manageTtl: true
+  telemetry:
+    traces: true
+    logs: true
+    metrics: false
+  logFormat: json
+  internalMetrics:
+    enabled: false
+    endpoint: ""
+  exporter:
+    endpoint: ""
+    database: otel
+    tablePrefix: otel
+    traces:
+      tablePrefix: ""
+    logs:
+      tablePrefix: ""
+    metrics:
+      tablePrefix: ""
+    user: default
+    existingSecret: ""
+    existingSecretKey: password
+    compression: lz4
+    asyncInsert: true
+    enableJson: false
+    engine: MergeTree
+    cluster: ""
+    databaseEngine: Replicated
+    databaseReplicaPath: ""
+    ttl: 168h
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 0
+    metrics: []
+    behavior: {}
+  service:
+    type: ClusterIP
+    annotations: {}
+  podLabels: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraArgs: []
+  extraEnv: []
+  jobs:
+    podLabels: {}
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# ---------------------------------------------------------------------------
+# TLS (cert-manager Certificates only; wire into CHI/CHK separately)
+# ---------------------------------------------------------------------------
+tls:
+  enabled: false
+  required: true
+  createCertificates: true
+  issuerRef:
+    name: ""
+    kind: Issuer
+  clickhouse:
+    existingSecret: ""
+  keeper:
+    existingSecret: ""

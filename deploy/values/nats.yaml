@@ -1,0 +1,77 @@
+# Values for charts/nats (nats/nats chart v2.14.2), sized for a single-node
+# local `kind` cluster running the trace-propagation demo stack.
+#
+# Install with:
+#   helm install nats charts/nats -f deploy/values/nats.yaml -n demo
+#
+# See charts/nats/SOURCE.txt for exact chart provenance and
+# charts/nats/values.yaml for the full set of configurable keys.
+
+# Prometheus metrics sidecar, scraped by VictoriaMetrics at nats:7777
+# (see deploy/values/victoria-metrics.yaml). The exporter reads NATS's own
+# monitoring endpoint, so config.monitor below must stay enabled — it is on by
+# chart default, but the dependency is easy to break accidentally.
+# The chart runs the exporter as a sidecar but has no service.ports entry for it,
+# so port 7777 is not exposed on the nats Service by default — VictoriaMetrics
+# then reports that target as permanently down, with no error surfaced anywhere
+# else. Merge the port in explicitly.
+#
+# IMPORTANT: this merge REPLACES spec.ports rather than appending to it (verified
+# with `helm template`), so the client port 4222 must be restated here. Omitting
+# it silently produces a Service with only port 7777 — every NATS client,
+# including the backend, then fails to connect.
+service:
+  merge:
+    spec:
+      ports:
+        - name: nats
+          port: 4222
+          targetPort: nats
+        - name: prom-exporter
+          port: 7777
+          targetPort: prom-metrics
+
+promExporter:
+  enabled: true
+  port: 7777
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+config:
+  # Single-node NATS: leave clustering disabled so the StatefulSet defaults
+  # to replicas: 1 (see charts/nats/files/stateful-set/stateful-set.yaml).
+  cluster:
+    enabled: false
+
+  jetstream:
+    enabled: true
+
+    fileStore:
+      enabled: true
+      dir: /data
+      pvc:
+        enabled: true
+        # Small footprint for a local demo cluster (chart default is 10Gi).
+        size: 1Gi
+
+    # Memory-backed JetStream storage stays disabled; file-backed storage on
+    # a modest PVC is sufficient for the demo's request/reply flow and
+    # survives pod restarts within the kind cluster's lifetime.
+    memoryStore:
+      enabled: false
+
+# NATS server container resource footprint, modest enough for a
+# resource-constrained kind node.
+container:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi

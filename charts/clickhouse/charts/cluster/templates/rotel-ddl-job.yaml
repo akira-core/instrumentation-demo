@@ -1,0 +1,133 @@
+{{- if and .Values.rotel.enabled .Values.rotel.createSchema }}
+{{- $chHost := include "cluster.clickhouseHost" . }}
+{{- $replicated := include "cluster.rotelDatabaseReplicated" . }}
+{{- $groups := include "cluster.rotelExporterGroups" . | fromYamlArray }}
+{{- if not $groups }}
+{{- fail "rotel.telemetry enables no signal — there is no schema to create. Enable traces, logs or metrics, or set rotel.createSchema=false." }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cluster.rotelName" . }}-ddl
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel-ddl
+  annotations:
+    # Runs after install/upgrade; retried by the pod until ClickHouse is up.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  activeDeadlineSeconds: 900
+  template:
+    {{- include "cluster.rotelJobPodMetadata" (dict "root" . "component" "rotel-ddl") | nindent 4 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with include "cluster.rotelJobScheduling" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      initContainers:
+        # Waits for ClickHouse and creates the target database.
+        - name: create-database
+          image: {{ include "cluster.image" .Values.clickhouse.image | quote }}
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          env:
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cluster.rotelPasswordSecretName" . | quote }}
+                  key: {{ include "cluster.rotelPasswordSecretKey" . | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              DB={{ .Values.rotel.exporter.database | quote }}
+              {{- if $replicated }}
+              # ON CLUSTER even for the Replicated engine: each host has to run
+              # the CREATE to join the database. Only later DDL is replicated.
+              QUERY="CREATE DATABASE IF NOT EXISTS $DB ON CLUSTER '{{ .Values.rotel.exporter.cluster }}' ENGINE = Replicated('{{ include "cluster.rotelDatabaseReplicaPath" . }}', '{shard}', '{replica}')"
+              WANT="Replicated"
+              {{- else if .Values.rotel.exporter.cluster }}
+              QUERY="CREATE DATABASE IF NOT EXISTS $DB ON CLUSTER '{{ .Values.rotel.exporter.cluster }}'"
+              WANT="Atomic"
+              {{- else }}
+              QUERY="CREATE DATABASE IF NOT EXISTS $DB"
+              WANT="Atomic"
+              {{- end }}
+
+              ch() {
+                clickhouse-client --host {{ $chHost }} \
+                  --user {{ .Values.rotel.exporter.user }} --password "$CH_PASSWORD" \
+                  --query "$1"
+              }
+
+              until ch "$QUERY"; do
+                echo "ClickHouse not ready yet; retrying in 5s"
+                sleep 5
+              done
+
+              # CREATE DATABASE IF NOT EXISTS keeps whatever engine the database
+              # already has, so a value change would otherwise apply silently to
+              # nothing. An engine cannot be swapped in place — the README has
+              # the copy-and-switch migration.
+              HAVE=$(ch "SELECT engine FROM system.databases WHERE name = '$DB'")
+              if [ "$HAVE" != "$WANT" ]; then
+                echo "WARNING: database $DB has engine $HAVE but rotel.exporter.databaseEngine asks for $WANT."
+                echo "WARNING: the existing engine is kept. With Atomic, a replica added later"
+                echo "WARNING: gets tables under a fresh UUID that do not replicate. See the README."
+              fi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      containers:
+        - name: clickhouse-ddl
+          image: {{ include "cluster.image" .Values.rotel.ddlImage | quote }}
+          imagePullPolicy: {{ .Values.rotel.ddlImage.pullPolicy }}
+          env:
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cluster.rotelPasswordSecretName" . | quote }}
+                  key: {{ include "cluster.rotelPasswordSecretKey" . | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              # One pass per table prefix, from the same grouping the deployment
+              # builds its exporters from, so every table rotel writes to is
+              # created here and no others are.
+              {{- range $g := $groups }}
+              echo "creating {{ $.Values.rotel.exporter.database }}.{{ $g.prefix }}_* ({{ join ", " $g.signals }})"
+              /clickhouse-ddl create \
+                --endpoint {{ include "cluster.rotelClickhouseEndpoint" $ | quote }} \
+                --database {{ $.Values.rotel.exporter.database | quote }} \
+                --table-prefix {{ $g.prefix | quote }} \
+                --user {{ $.Values.rotel.exporter.user | quote }} \
+                --password "$CH_PASSWORD" \
+                --engine {{ $.Values.rotel.exporter.engine | quote }} \
+                {{- if not $replicated }}
+                {{- with $.Values.rotel.exporter.cluster }}
+                --cluster {{ . | quote }} \
+                {{- end }}
+                {{- end }}
+                {{- range $signal := $g.signals }}
+                --{{ $signal }} \
+                {{- end }}
+                {{- if $.Values.rotel.exporter.enableJson }}
+                --enable-json \
+                {{- end }}
+                --ttl {{ $.Values.rotel.exporter.ttl | quote }}
+              {{- end }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+{{- end }}

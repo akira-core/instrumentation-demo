@@ -1,0 +1,28 @@
+# Patterns to ignore when building packages.
+# VCS
+.git/
+.gitignore
+# Test / session artifacts
+.playwright-mcp/
+*.png
+*.log
+dist/
+# Rendered output parked inside the chart. Helm loads every file under
+# templates/ and passes a plain YAML through untouched, so last render's output
+# becomes this render's template and the manifest doubles each time. It would
+# also be applied for real by helm install. Prefer redirecting to dist/ or /tmp;
+# these are the backstop. Subcharts do not inherit this file — charts/cluster
+# carries its own copy.
+rendered*.yaml
+out*.yaml
+manifest*.yaml
+*.rendered.yaml
+*.out.yaml
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+# CI / docs not needed inside the package
+Makefile

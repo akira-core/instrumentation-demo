@@ -1,0 +1,7 @@
+TraceId=102b25e8f42be31c0a7639092e06237b
+   ┌─SpanName────────────────┬─SpanKind─┐
+1. │ POST /api/demo-trace    │ Server   │
+2. │ send demo.trace.request │ Producer │
+   └─────────────────────────┴──────────┘
+nats_count=1
+http_count=1

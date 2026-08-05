@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/part-of: demo-trace-propagation-stack
+    spec:
+      containers:
+        - name: backend
+          image: demo-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: NATS_URL
+              value: "nats://nats:4222"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://rotel:4318"
+            # Also the service.name targeting attribute otelnats supplies on
+            # every flag evaluation, so a relay rule can target this service
+            # rather than every process resolving the flag.
+            - name: OTEL_SERVICE_NAME
+              value: "demo-backend"
+            - name: CORS_ALLOWED_ORIGIN
+              value: "*"
+            #
+            # --- Tracing ladder: relay > env > option > default ---
+            #
+            # Demo posture (option C): module env is explicitly off; the ConfigMap
+            # default otel-nats-tracing=enabled makes the relay ENABLE tracing.
+            # Flip the ConfigMap to disabled to stop NATS spans without redeploy.
+            #
+            # Process-wide master switch (veto). Default in the library is true;
+            # keep it on so the module flag / relay can decide. false stops every
+            # module regardless of relay or options.
+            - name: OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+              value: "1"
+            # This module's env rung — explicit false so the happy path proves
+            # relay enable. Unset would also be "no opinion" (default false);
+            # false is clearer for operators reading the Deployment.
+            - name: OTEL_NATS_TRACING_ENABLED
+              value: "false"
+            # Relay proxy URL (Helm release "relay-proxy", chart default port
+            # 1031). Setting this is the whole of the wiring: otelnats builds a
+            # GO Feature Flag provider on its first instrumented operation, binds
+            # it to its own OpenFeature domain, and hardcodes in-process
+            # evaluation plus DataCollectorDisabled. No application code, and the
+            # backend's own OpenFeature state is untouched. Unset it and the
+            # deployment simply loses runtime control (env/option/default only).
+            - name: OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
+              value: "http://relay-proxy:1031"
+            # How often that provider polls the relay — and therefore the upper
+            # bound on how long a ConfigMap flip takes to reach this process. Go
+            # duration string ("2", without a unit, is rejected). The library
+            # default is 60s, which is right for production and far too slow to
+            # demo; 2s here keeps a `kubectl edit configmap` visible within a few
+            # seconds. The poll is a conditional GET that 304s when nothing
+            # changed, so tightening it is cheap.
+            - name: OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL
+              value: "2s"
+          # NATS connects asynchronously with retry/backoff (task 2.7), and
+          # /healthz never blocks on it — so readiness/liveness can both key
+          # off /healthz without fighting the dependency-ordering tolerance
+          # requirement (backend must not crash-loop while NATS is still
+          # starting).
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

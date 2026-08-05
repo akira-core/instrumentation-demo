@@ -1,0 +1,95 @@
+# On-demand OTLP trace load generator for performance testing.
+#
+# Apply this through `make load-test`, not `kubectl apply -f`: the __PLACEHOLDER__
+# values below are substituted by the Makefile (see the env block for why they
+# are placeholders). Applying this file directly would create a Job with literal
+# "__WORKERS__" arguments.
+#
+# Deliberately NOT part of deploy/base/'s kustomization: `make deploy` must never
+# start load. Run it explicitly instead:
+#
+#   make load-test                       # Makefile defaults
+#   make load-test WORKERS=10 DURATION=2m SPANS_PER_RESOURCE=500
+#   make load-test-logs
+#   make load-test-clean
+#
+# otel-loadgen (github.com/streamfold/otel-loadgen, same authors as rotel)
+# generates trace spans only — not metrics or logs, despite the general-sounding
+# name. So it loads the TRACE pipeline; the metrics pipeline is how that load is
+# observed, not what is generated.
+#
+# It targets rotel's gRPC port (4317) because that is otel-loadgen's native
+# default protocol; the HTTP path would need --http and buys nothing here. This
+# is the same collector endpoint the demo's own services use, so the load
+# traverses the real ingestion path rather than a test-only shortcut.
+#
+# A Job (not a Deployment) is the right primitive: bounded, run-to-completion
+# work that stops on its own. backoffLimit 0 + restartPolicy Never mean a failed
+# run stays failed and visible instead of quietly retrying forever.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: otel-loadgen
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: otel-loadgen
+    app.kubernetes.io/component: load-generator
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  backoffLimit: 0
+  # Keep the finished Job around briefly so its logs can be read after the run;
+  # `make load-test` deletes any previous Job before applying, so this TTL is a
+  # convenience, not the cleanup mechanism.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-loadgen
+        app.kubernetes.io/component: load-generator
+        app.kubernetes.io/part-of: demo-trace-propagation-stack
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: otel-loadgen
+          image: docker.io/streamfold/otel-loadgen:v0.0.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - "gen"
+            - "traces"
+            - "--otlp-endpoint=$(OTLP_ENDPOINT)"
+            - "--workers=$(WORKERS)"
+            - "--spans-per-resource=$(SPANS_PER_RESOURCE)"
+            - "--push-interval=$(PUSH_INTERVAL)"
+            - "--duration=$(DURATION)"
+          env:
+            - name: OTLP_ENDPOINT
+              value: "rotel:4317"
+            # The __PLACEHOLDER__ values are substituted by `make load-test`
+            # before this manifest reaches the cluster; the Makefile holds the
+            # defaults. They are placeholders rather than real values on purpose:
+            # a Job's pod template is immutable, so parameters cannot be patched
+            # onto an already-created Job — they have to be correct at apply time.
+            #
+            # Defaults are conservative because this is a single-node kind cluster
+            # sharing a laptop with ClickHouse, Grafana, NATS and the demo
+            # services. Push harder with
+            #   make load-test WORKERS=10 SPANS_PER_RESOURCE=500 DURATION=2m
+            # once you know the cluster can take it. Results are indicative of
+            # relative behavior, not benchmarks.
+            - name: WORKERS
+              value: "__WORKERS__"
+            - name: SPANS_PER_RESOURCE
+              value: "__SPANS_PER_RESOURCE__"
+            - name: PUSH_INTERVAL
+              value: "__PUSH_INTERVAL__"
+            # Always bounded. A load generator with no duration in a demo cluster
+            # is load that runs until someone remembers to turn it off.
+            - name: DURATION
+              value: "__DURATION__"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 1
+              memory: 256Mi

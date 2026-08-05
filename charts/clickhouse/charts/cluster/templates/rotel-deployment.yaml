@@ -1,0 +1,154 @@
+{{- if .Values.rotel.enabled }}
+{{- $internal := .Values.rotel.internalMetrics | default dict }}
+{{- $internalEnabled := dig "enabled" false $internal }}
+{{- $vmEndpoint := dig "endpoint" "" $internal | toString }}
+{{- if and $internalEnabled (eq $vmEndpoint "") }}
+{{- fail "rotel.internalMetrics.enabled=true requires rotel.internalMetrics.endpoint (VictoriaMetrics OTLP base URL, e.g. http://vmsingle.monitoring.svc:8428/opentelemetry)" }}
+{{- end }}
+{{- $logFormat := .Values.rotel.logFormat | default "json" | toString }}
+{{- if not (has $logFormat (list "text" "json")) }}
+{{- fail (printf "rotel.logFormat %q: must be text or json" $logFormat) }}
+{{- end }}
+{{- $groups := include "cluster.rotelExporterGroups" . | fromYamlArray }}
+{{- if not $groups }}
+{{- fail "rotel.telemetry enables no signal — rotel exits at startup with \"no telemetry pipeline exporters\". Enable traces, logs or metrics, or set rotel.enabled=false." }}
+{{- end }}
+{{- /* Exporter name each signal is routed to, keyed by signal. */}}
+{{- $route := dict }}
+{{- range $g := $groups }}{{- range $s := $g.signals }}{{- $_ := set $route $s $g.name }}{{- end }}{{- end }}
+{{- $exporters := list }}
+{{- range $g := $groups }}{{- $exporters = append $exporters (printf "%s:clickhouse" $g.name) }}{{- end }}
+{{- if $internalEnabled }}{{- $exporters = append $exporters "vm:otlp" }}{{- end }}
+{{- /* Internal metrics ride on the metrics pipeline's activation: rotel only
+     wires internal_metrics when activation.metrics is Active (init/agent.rs),
+     which needs both the OTLP metrics receiver enabled and a non-empty
+     --exporters-metrics. With telemetry.metrics off, metrics are therefore
+     routed to VictoriaMetrics purely to keep that pipeline alive — anything an
+     app sends to the metrics receiver lands there too. */}}
+{{- $metricsRoute := "" }}
+{{- if .Values.rotel.telemetry.metrics }}{{- $metricsRoute = index $route "metrics" }}
+{{- else if $internalEnabled }}{{- $metricsRoute = "vm" }}{{- end }}
+{{- $acceptMetrics := or .Values.rotel.telemetry.metrics $internalEnabled }}
+{{- $autoscaling := .Values.rotel.autoscaling | default dict }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cluster.rotelName" . }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotel
+  annotations:
+    {{- include "cluster.argocdAnnotations" "rotel" | nindent 4 }}
+spec:
+  {{- if not (dig "enabled" false $autoscaling) }}
+  # Omitted under autoscaling: helm would otherwise reset the replica count the
+  # HPA just chose on every upgrade.
+  replicas: {{ .Values.rotel.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cluster.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: rotel
+  template:
+    metadata:
+      labels:
+        {{- include "cluster.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: rotel
+        {{- with .Values.rotel.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.rotel.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        - name: rotel
+          image: {{ include "cluster.image" .Values.rotel.image | quote }}
+          imagePullPolicy: {{ .Values.rotel.image.pullPolicy }}
+          # Image entrypoint is `rotel start --otlp-grpc-endpoint 0.0.0.0:4317
+          # --otlp-http-endpoint 0.0.0.0:4318`; args are appended options.
+          {{- $args := list }}
+          {{- if not .Values.rotel.telemetry.traces }}
+          {{- $args = append $args "--otlp-receiver-traces-disabled" }}
+          {{- end }}
+          {{- if not .Values.rotel.telemetry.logs }}
+          {{- $args = append $args "--otlp-receiver-logs-disabled" }}
+          {{- end }}
+          {{- if not $acceptMetrics }}
+          {{- $args = append $args "--otlp-receiver-metrics-disabled" }}
+          {{- end }}
+          {{- $args = concat $args (.Values.rotel.extraArgs | default list) }}
+          {{- with $args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: ROTEL_LOG_FORMAT
+              value: {{ $logFormat | quote }}
+            # One named ClickHouse exporter per distinct table prefix, plus an
+            # OTLP/HTTP one for VictoriaMetrics when internal metrics are on.
+            # The named layout is used even for a single exporter: rotel's
+            # ROTEL_EXPORTER=clickhouse shorthand never populates the
+            # internal-metrics pipeline (init/config.rs), and one code path
+            # cannot drift from what the DDL job creates.
+            - name: ROTEL_EXPORTERS
+              value: {{ join "," $exporters | quote }}
+            {{- if .Values.rotel.telemetry.traces }}
+            - name: ROTEL_EXPORTERS_TRACES
+              value: {{ index $route "traces" | quote }}
+            {{- end }}
+            {{- if .Values.rotel.telemetry.logs }}
+            - name: ROTEL_EXPORTERS_LOGS
+              value: {{ index $route "logs" | quote }}
+            {{- end }}
+            {{- with $metricsRoute }}
+            - name: ROTEL_EXPORTERS_METRICS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $internalEnabled }}
+            - name: ROTEL_ENABLE_INTERNAL_TELEMETRY
+              value: "true"
+            - name: ROTEL_EXPORTERS_INTERNAL_METRICS
+              value: "vm"
+            - name: ROTEL_EXPORTER_VM_ENDPOINT
+              value: {{ $vmEndpoint | quote }}
+            - name: ROTEL_EXPORTER_VM_PROTOCOL
+              value: "http"
+            {{- end }}
+            {{- range $g := $groups }}
+            {{- include "cluster.rotelClickhouseExporterEnv" (dict "root" $ "name" $g.name "prefix" $g.prefix) | nindent 12 }}
+            {{- end }}
+            {{- with .Values.rotel.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          readinessProbe:
+            tcpSocket:
+              port: otlp-grpc
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: otlp-grpc
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.rotel.resources | nindent 12 }}
+      {{- with .Values.rotel.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.rotel.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.rotel.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
