@@ -1,5 +1,6 @@
-# Flag definitions in GO Feature Flag's own format, read live by the GOFF relay
-# proxy through its Kubernetes ConfigMap retriever (deploy/values/relay-proxy.yaml).
+# Flag definitions in GO Feature Flag's own format. The GOFF relay proxy mounts
+# this ConfigMap as a volume and reads flags.yaml via its file retriever
+# (deploy/values/relay-proxy.yaml) — no Kubernetes API access needed.
 #
 # Edit live during a demo — neither the relay proxy nor the backend restarts:
 #   kubectl edit configmap demo-feature-flags -n demo
@@ -9,30 +10,21 @@
 # demo request.
 #
 #   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
-#                      application code involved. Setting it to `disabled`
-#                      stops NATS producer/consumer spans being emitted at all,
-#                      live. The NATS publish/consume/reply still runs.
+#                      application code involved. Under instrumentation-go's
+#                      ladder (relay > env > option > default) the relay is
+#                      authoritative in BOTH directions: it can disable tracing
+#                      the deployment left on and enable tracing the deployment
+#                      left off.
 #
-# This flag is a KILL SWITCH ONLY. It can revoke instrumentation the deployment
-# turned on; it can never turn anything on. Effective tracing is
+# Demo posture (option C): backend sets OTEL_NATS_TRACING_ENABLED=false and
+# OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1. Default variation below is
+# `enabled`, so out-of-the-box NATS spans appear because the relay enables what
+# the module environment left off. Flip to `disabled` to stop spans; flip back
+# to restore them — no redeploy.
 #
-#   OTEL_INSTRUMENTATION_GO_TRACING_ENABLED && OTEL_NATS_TRACING_ENABLED
-#   && this flag
-#
-# so with either environment variable off (deploy/base/backend.yaml sets both
-# truthy) no value here has any effect — the flag is not even evaluated. The
-# `enabled` variation below therefore does not enable anything; it declines to
-# revoke, which is also what every failure path resolves to: relay unreachable,
-# provider not yet ready, key absent, wrong type. All of them mean "the
-# environment decides".
-#
-# Latency is the backend provider's poll interval
-# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s in this demo) on top of the
-# relay's own ConfigMap re-read (pollingInterval: 1000 in
-# deploy/values/relay-proxy.yaml) — a few seconds, not instant.
-#
-# There is no relay key for the process-wide kill switch, by design: stopping a
-# process entirely is a redeploy, not a flag.
+# Latency is kubelet mount refresh + the relay's pollingInterval (1000 ms in
+# deploy/values/relay-proxy.yaml) + the backend provider's poll interval
+# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s) — a few seconds, not instant.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -135,6 +135,13 @@ tolerations: []
 # -- Affinity settings for pod assignment to nodes
 affinity: {}
 
+# -- Extra volumes to attach to the relay-proxy pod (local patch; not upstream).
+# Used by this demo to mount the flags ConfigMap for GOFF's file retriever.
+extraVolumes: []
+
+# -- Extra volume mounts for the relay-proxy container (local patch; not upstream).
+extraVolumeMounts: []
+
 # -- Array of extra objects to deploy with the release (evaluated as a template)
 extraManifests: []
 #  - kind: Role

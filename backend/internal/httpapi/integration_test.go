@@ -121,11 +121,12 @@ func postDemoTrace(t *testing.T, handler http.HandlerFunc) demoTraceResponse {
 
 // TestDemoTraceHandler_FullNatsRoundTrip exercises the handler against a real
 // (embedded) NATS server, covering the full publish/consume/reply round trip.
+// Matches deployment posture: module env off, relay (in-memory stand-in) on.
 func TestDemoTraceHandler_FullNatsRoundTrip(t *testing.T) {
 	_ = setupGlobalTracing(t)
 	isolateFromRelay(t)
 	t.Setenv(envGlobalTracingEnabled, "1")
-	t.Setenv(envNATSTracingEnabled, "1")
+	t.Setenv(envNATSTracingEnabled, "false")
 
 	setLibraryTracingFlag(t, true)
 
@@ -144,15 +145,10 @@ func TestDemoTraceHandler_FullNatsRoundTrip(t *testing.T) {
 
 // TestRelayFlagTogglesNatsInstrumentation is the regression test for this
 // demo's headline capability: an operator flipping otel-nats-tracing on the
-// relay proxy turns otelnats's spans on and off in a running process, with no
-// restart and no application code involved in the decision. The NATS business
-// path still completes in every phase.
-//
-// Both environment tiers are ON here, which is what the deployment sets. Under
-// 0.8.0's revoke-only model that is mandatory rather than incidental: the relay
-// can only subtract, so a module whose environment variable is off can never be
-// switched back on by any flag value — see
-// TestRelayCannotEnableNatsInstrumentation, which pins that half.
+// relay turns otelnats's spans on and off in a running process, with no
+// restart and no application code involved. Matches deployment option C —
+// OTEL_NATS_TRACING_ENABLED is falsy; the relay enables and disables in both
+// directions. The NATS business path still completes in every phase.
 //
 // There are no sleeps between the phases. The resolver caches nothing, so a
 // rebound provider takes effect on the next operation; in production the only
@@ -161,9 +157,9 @@ func TestRelayFlagTogglesNatsInstrumentation(t *testing.T) {
 	rec := setupGlobalTracing(t)
 	isolateFromRelay(t)
 	t.Setenv(envGlobalTracingEnabled, "1")
-	t.Setenv(envNATSTracingEnabled, "1")
+	t.Setenv(envNATSTracingEnabled, "false")
 
-	// Phase 1: relay serves the flag as enabled.
+	// Phase 1: relay serves the flag as enabled — enables what env left off.
 	setLibraryTracingFlag(t, true)
 
 	nm := startNATS(t)
@@ -172,24 +168,21 @@ func TestRelayFlagTogglesNatsInstrumentation(t *testing.T) {
 	_ = postDemoTrace(t, handler)
 	tracedOn := countNATSSpans(rec.Ended())
 	if tracedOn == 0 {
-		t.Fatalf("phase 1: no NATS spans emitted while the relay served otel-nats-tracing=enabled; "+
-			"got %d spans overall", len(rec.Ended()))
+		t.Fatalf("phase 1: no NATS spans while relay served otel-nats-tracing=enabled with "+
+			"OTEL_NATS_TRACING_ENABLED=false; got %d spans overall", len(rec.Ended()))
 	}
 
-	// Phase 2: operator revokes the flag on the relay. Same process, same
-	// connection, no restart. Business path must still succeed.
+	// Phase 2: operator disables the flag. Same process, same connection.
 	setLibraryTracingFlag(t, false)
 
 	before := countNATSSpans(rec.Ended())
 	_ = postDemoTrace(t, handler)
 	if after := countNATSSpans(rec.Ended()); after != before {
-		t.Errorf("phase 2: %d new NATS spans emitted after the relay revoked otel-nats-tracing, want 0 — "+
+		t.Errorf("phase 2: %d new NATS spans after relay set otel-nats-tracing=disabled, want 0 — "+
 			"is the relay verdict still resolved per operation?", after-before)
 	}
 
-	// Phase 3: restore the flag; instrumentation must return. This is the half
-	// that only holds because the environment tiers are on — restoring a flag
-	// lifts a revocation, it does not enable anything.
+	// Phase 3: restore enabled; instrumentation must return via the relay.
 	setLibraryTracingFlag(t, true)
 
 	before = countNATSSpans(rec.Ended())
@@ -199,20 +192,13 @@ func TestRelayFlagTogglesNatsInstrumentation(t *testing.T) {
 	}
 }
 
-// TestRelayCannotEnableNatsInstrumentation pins the other half of 0.8.0's
-// kill-switch model, and the half that is easy to regress without noticing: the
-// relay can only REVOKE. With OTEL_NATS_TRACING_ENABLED off in the environment,
-// a relay serving otel-nats-tracing=true must not produce a single span.
+// TestRelayEnablesWhatEnvLeftOff pins the ladder direction that revoke-only
+// models could not express: with OTEL_NATS_TRACING_ENABLED=false, a relay
+// serving otel-nats-tracing=true MUST produce NATS spans.
 //
-// Before 0.8.0 the module env var was passed as the evaluation DEFAULT, so a
-// relay value overrode it in both directions and this test's setup was the
-// documented way to turn instrumentation ON. It is now the documented way to
-// keep it off, which is why this is worth a test rather than a comment: the two
-// models differ only in behavior, not in configuration.
-//
-// The module variable is read once, at construction, so it is set before
-// startNATS builds the connection.
-func TestRelayCannotEnableNatsInstrumentation(t *testing.T) {
+// The named provider is bound before startNATS so RelayPossible() is true at
+// construction and the instrumented implementation is allocated.
+func TestRelayEnablesWhatEnvLeftOff(t *testing.T) {
 	rec := setupGlobalTracing(t)
 	isolateFromRelay(t)
 	t.Setenv(envGlobalTracingEnabled, "1")
@@ -225,12 +211,35 @@ func TestRelayCannotEnableNatsInstrumentation(t *testing.T) {
 
 	got := postDemoTrace(t, handler)
 
-	// The business path still runs — the flag governs telemetry, not behavior.
+	if !traceIDPattern.MatchString(got.TraceID) {
+		t.Errorf("traceId = %q, want 32 hex chars", got.TraceID)
+	}
+	if n := countNATSSpans(rec.Ended()); n == 0 {
+		t.Errorf("no NATS spans with OTEL_NATS_TRACING_ENABLED=false and relay enabled — "+
+			"the relay must be able to enable what the environment left off (got %d spans overall)",
+			len(rec.Ended()))
+	}
+}
+
+// TestNoRelayEnvOffEmitsNoNATSSpans: with no relay possible and the module env
+// falsy, the local ladder stays off and no NATS instrumentation spans appear.
+// The business path still succeeds.
+func TestNoRelayEnvOffEmitsNoNATSSpans(t *testing.T) {
+	rec := setupGlobalTracing(t)
+	isolateFromRelay(t)
+	t.Setenv(envGlobalTracingEnabled, "1")
+	t.Setenv(envNATSTracingEnabled, "false")
+	// Deliberately no setLibraryTracingFlag — RelayPossible stays false.
+
+	nm := startNATS(t)
+	handler := NewDemoTraceHandler(nm, nil)
+
+	got := postDemoTrace(t, handler)
+
 	if !traceIDPattern.MatchString(got.TraceID) {
 		t.Errorf("traceId = %q, want 32 hex chars", got.TraceID)
 	}
 	if n := countNATSSpans(rec.Ended()); n != 0 {
-		t.Errorf("%d NATS spans emitted with OTEL_NATS_TRACING_ENABLED=false, want 0 — "+
-			"the relay must not be able to enable what the environment left off", n)
+		t.Errorf("%d NATS spans with no relay and OTEL_NATS_TRACING_ENABLED=false, want 0", n)
 	}
 }

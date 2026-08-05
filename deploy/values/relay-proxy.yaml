@@ -10,9 +10,8 @@
 # OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT; no backend code reads it).
 #
 # Flags are NOT defined here. They live in the demo-feature-flags ConfigMap
-# (deploy/base/feature-flags-configmap.yaml) and are read through GOFF's native
-# Kubernetes ConfigMap retriever below — this is the "relay proxy reads the k8s
-# config" requirement, and it is why this component needs RBAC at all.
+# (deploy/base/feature-flags-configmap.yaml), volume-mounted below, and read by
+# GOFF's file retriever. No ConfigMap API RBAC is required.
 
 relayproxy:
   config: |
@@ -25,35 +24,29 @@ relayproxy:
       # so the pod's readiness now depends on it being served correctly.
       monitoringPort: 1032
 
-    # How often GOFF re-reads the ConfigMap, in ms. Deliberately short (1s) so a
-    # `kubectl edit configmap demo-feature-flags` reaches the relay's own view
-    # quickly. This is only the first of two hops: otelnats's provider evaluates
-    # in-process and polls this relay every
-    # OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in this demo), so an
-    # operator sees a revocation take effect within a few seconds, not instantly.
-    # Remote per-evaluation lookups would be faster and are deliberately not used
-    # — they would put an HTTP request on the path of every NATS publish.
+    # How often GOFF re-reads the mounted flags file, in ms. Deliberately short
+    # (1s) so a `kubectl edit configmap demo-feature-flags` reaches the relay's
+    # own view quickly (after kubelet refreshes the mount). This is only the
+    # first of two hops: otelnats's provider evaluates in-process and polls this
+    # relay every OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in this demo),
+    # so an operator sees a flip take effect within a few seconds, not instantly.
     pollingInterval: 1000
 
-    # Start even if the ConfigMap isn't readable yet, rather than crash-looping.
-    # `kubectl apply -k deploy/base` (which creates the ConfigMap) and
-    # `helm install` run independently, so either order must work — see the
-    # kind-cluster-deployment spec's dependency-ordering requirement. While the
-    # retriever has nothing, evaluations return the caller's default, and
-    # otelnats's default is a literal true meaning "do not interfere" — so the
-    # environment alone decides and the demo behaves exactly as deployed.
+    # Start even if the mounted flags file is not readable yet, rather than
+    # crash-looping. `helm install` runs before `kubectl apply -k deploy/base`
+    # (which creates the ConfigMap), and the volume is optional — see
+    # kind-cluster-deployment. While the retriever has nothing, evaluations
+    # return the caller's default and the local ladder below the relay decides.
     startWithRetrieverError: true
 
     logLevel: info
 
-    # GOFF's native Kubernetes retriever: reads flag definitions straight from
-    # the cluster's own API server. Only works in-cluster (upstream limitation),
-    # which is fine — the whole demo is kind-scoped.
+    # File retriever over the volume-mounted ConfigMap (directory mount, not
+    # subPath, so kubelet refreshes on ConfigMap edit). Path matches
+    # extraVolumeMounts below.
     retriever:
-      kind: configmap
-      namespace: demo
-      configmap: demo-feature-flags
-      key: flags.yaml
+      kind: file
+      path: /flags/flags.yaml
 
     # Evaluation results are logged rather than shipped anywhere — this is a
     # local demo, and no flag-analytics backend exists in the stack.
@@ -86,32 +79,22 @@ resources:
 serviceAccount:
   create: true
 
-# Least-privilege RBAC for the ConfigMap retriever above: read-only, this
-# namespace only, and restricted by resourceNames to the single ConfigMap holding
-# the flags — never a ClusterRole. The chart evaluates extraManifests as a
-# template, so the ServiceAccount name is taken from the chart's own helper
-# rather than hardcoded, and stays correct if the release is ever renamed.
-extraManifests:
-  - kind: Role
-    apiVersion: rbac.authorization.k8s.io/v1
-    metadata:
-      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
-      namespace: "{{ .Release.Namespace }}"
-    rules:
-      - apiGroups: [""]
-        resources: ["configmaps"]
-        resourceNames: ["demo-feature-flags"]
-        verbs: ["get", "list", "watch"]
-  - kind: RoleBinding
-    apiVersion: rbac.authorization.k8s.io/v1
-    metadata:
-      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
-      namespace: "{{ .Release.Namespace }}"
-    subjects:
-      - kind: ServiceAccount
-        name: '{{ include "relay-proxy.serviceAccountName" . }}'
-        namespace: "{{ .Release.Namespace }}"
-    roleRef:
-      kind: Role
-      name: '{{ include "relay-proxy.fullname" . }}-read-feature-flags'
-      apiGroup: rbac.authorization.k8s.io
+# Mount demo-feature-flags (created by deploy/base) at /flags. optional: true
+# so the pod can start before k8s-apply creates the ConfigMap; GOFF then picks
+# up the file once kubelet populates the mount.
+extraVolumes:
+  - name: demo-feature-flags
+    configMap:
+      name: demo-feature-flags
+      optional: true
+      items:
+        - key: flags.yaml
+          path: flags.yaml
+
+extraVolumeMounts:
+  - name: demo-feature-flags
+    mountPath: /flags
+    readOnly: true
+
+# No ConfigMap API Role/RoleBinding — flags come from the mount above.
+extraManifests: []

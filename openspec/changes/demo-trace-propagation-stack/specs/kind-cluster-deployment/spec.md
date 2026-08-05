@@ -25,9 +25,9 @@ Components that depend on another component being available SHALL tolerate that 
 - **WHEN** the backend workload starts before the NATS workload has become ready
 - **THEN** the backend retries its NATS connection and successfully connects once NATS becomes ready, without being restarted by Kubernetes for repeated crashes
 
-#### Scenario: Relay proxy starts before its config source exists
-- **WHEN** the relay proxy starts before its Kubernetes configuration source has been created
-- **THEN** the relay proxy waits/retries and begins serving evaluations once the configuration source becomes available, without crash-looping
+#### Scenario: Relay proxy starts before its flags ConfigMap exists
+- **WHEN** the relay proxy starts before the flags ConfigMap that backs its volume mount has been created
+- **THEN** the relay proxy pod still starts (optional mount and/or tolerant file retriever) and begins serving evaluations once the ConfigMap appears and is readable at the mount path, without crash-looping
 
 ### Requirement: Deployed services are reachable for demo interaction
 After deployment, a developer SHALL be able to reach the frontend (or backend API, if the frontend is a static asset served separately) and the Grafana dashboard from their local machine using a documented access method.

@@ -33,44 +33,40 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://rotel:4318"
             # Also the service.name targeting attribute otelnats supplies on
-            # every flag evaluation, so a relay rule can revoke this service
+            # every flag evaluation, so a relay rule can target this service
             # rather than every process resolving the flag.
             - name: OTEL_SERVICE_NAME
               value: "demo-backend"
             - name: CORS_ALLOWED_ORIGIN
               value: "*"
             #
-            # --- Tracing: three conjunctive tiers, only the last is dynamic ---
+            # --- Tracing ladder: relay > env > option > default ---
             #
-            #   tracing = OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
-            #             && OTEL_NATS_TRACING_ENABLED
-            #             && relay flag otel-nats-tracing
+            # Demo posture (option C): module env is explicitly off; the ConfigMap
+            # default otel-nats-tracing=enabled makes the relay ENABLE tracing.
+            # Flip the ConfigMap to disabled to stop NATS spans without redeploy.
             #
-            # Process-wide kill switch. No relay counterpart, and no relay value
-            # can substitute for it: while it is off, otelnats allocates only its
-            # passthrough implementation and no OpenFeature code path is
-            # reachable. Must not be combined with otelnats.WithTracingEnabled()
-            # in code — the two are one switch with two spellings, and setting
-            # both is a construction error.
+            # Process-wide master switch (veto). Default in the library is true;
+            # keep it on so the module flag / relay can decide. false stops every
+            # module regardless of relay or options.
             - name: OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
               value: "1"
-            # This module's switch, read once at connect. NOT a fallback default
-            # for the relay flag — it is a separate conjunctive tier. With it
-            # off, otel-nats-tracing is never evaluated and no flag value can
-            # turn NATS instrumentation back on; the relay only ever subtracts.
+            # This module's env rung — explicit false so the happy path proves
+            # relay enable. Unset would also be "no opinion" (default false);
+            # false is clearer for operators reading the Deployment.
             - name: OTEL_NATS_TRACING_ENABLED
-              value: "1"
+              value: "false"
             # Relay proxy URL (Helm release "relay-proxy", chart default port
             # 1031). Setting this is the whole of the wiring: otelnats builds a
             # GO Feature Flag provider on its first instrumented operation, binds
             # it to its own OpenFeature domain, and hardcodes in-process
             # evaluation plus DataCollectorDisabled. No application code, and the
             # backend's own OpenFeature state is untouched. Unset it and the
-            # deployment simply loses runtime revocation.
+            # deployment simply loses runtime control (env/option/default only).
             - name: OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
               value: "http://relay-proxy:1031"
             # How often that provider polls the relay — and therefore the upper
-            # bound on how long a revocation takes to reach this process. Go
+            # bound on how long a ConfigMap flip takes to reach this process. Go
             # duration string ("2", without a unit, is rejected). The library
             # default is 60s, which is right for production and far too slow to
             # demo; 2s here keeps a `kubectl edit configmap` visible within a few

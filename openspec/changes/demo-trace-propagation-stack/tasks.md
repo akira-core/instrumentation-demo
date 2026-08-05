@@ -32,10 +32,10 @@
 - [x] 3.3 ~~Bespoke `GET /evaluate/:flagKey` + `/healthz` + Dockerfile + fake-clientset tests~~ — superseded by the upstream GOFF relay proxy image/chart
 - [x] 3.4 Delete the `relay-proxy/` Go module and drop it from `go.work`; remove its image build from the Makefile and its `deploy/base/relay-proxy.yaml` manifest
 - [x] 3.5 Vendor the official GOFF relay-proxy Helm chart into `charts/relay-proxy` (`helm repo add go-feature-flag https://charts.gofeatureflag.org/ && helm pull go-feature-flag/relay-proxy --untar -d charts/`), stamping `charts/relay-proxy/SOURCE.txt` with repo + exact chart version
-- [x] 3.6 Write `deploy/values/relay-proxy.yaml` configuring GOFF's Kubernetes ConfigMap retriever (`kind: configmap`, `namespace: demo`, `configmap: demo-feature-flags`, `key: flags.yaml`), a short `pollingInterval` so `kubectl edit` shows up quickly, and modest `kind`-sized resources
-- [x] 3.7 Rewrite the `demo-feature-flags` ConfigMap (`deploy/base/feature-flags-configmap.yaml`) from the old custom JSON into GOFF's flag format under a `flags.yaml` key (initially both `otel-nats-tracing` and `demo-nats-flow`; **section 9 removes the app flag** so only library flags remain)
-- [x] 3.8 Replace the relay-proxy ServiceAccount/Role/RoleBinding with ones bound to the GOFF chart's ServiceAccount, scoped to `get`/`list`/`watch` on the single `demo-feature-flags` ConfigMap in the `demo` namespace
-- [x] 3.9 Backend: register the OpenFeature GOFF provider at startup — `gofeatureflag.NewProvider(...)` + `openfeature.SetProviderAndWait` — remove `otelnats.WithTracingEnabled(true)` from the NATS connect call, delete `internal/relayclient`, and set `OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1` + `OTEL_NATS_TRACING_ENABLED=1` in the backend manifest. (**Section 9 removes** per-request evaluation of `demo-nats-flow`; provider install remains for library resolution.)
+- [x] 3.6 Write `deploy/values/relay-proxy.yaml` configuring GOFF's Kubernetes ConfigMap retriever (`kind: configmap`, …) — **superseded by section 10** (file retriever + volume mount)
+- [x] 3.7 Rewrite the `demo-feature-flags` ConfigMap (`deploy/base/feature-flags-configmap.yaml`) from the old custom JSON into GOFF's flag format under a `flags.yaml` key (initially both `otel-nats-tracing` and `demo-nats-flow`; **section 9 removes the app flag** so only library flags remain; **section 10** updates comments for the ladder)
+- [x] 3.8 Replace the relay-proxy ServiceAccount/Role/RoleBinding with ones bound to the GOFF chart's ServiceAccount for ConfigMap API reads — **superseded by section 10** (no ConfigMap API RBAC)
+- [x] 3.9 Backend: register the OpenFeature GOFF provider at startup — later replaced by zero-code `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT`; set env tiers for revoke-only — **section 10** sets `OTEL_NATS_TRACING_ENABLED=false` for ladder option C
 
 ## 4. Frontend (JS)
 
@@ -64,9 +64,8 @@
 ## 7. Kubernetes deployment topology
 
 - [x] 7.1 Write `deploy/kind-cluster.yaml` kind cluster config
-- [x] 7.2 Write Kustomize base (`deploy/base/`) with `Namespace: demo` and the in-house component manifests only — NATS, ClickHouse, Grafana, and (per 3.5) the GOFF relay proxy are deployed via their vendored charts, not Kustomize. **Update for the rework**: drop `relay-proxy.yaml` from `resources`, keep the flags ConfigMap and the relay proxy's RBAC there.
-- [x] 7.3 ~~ServiceAccount + Role + RoleBinding for the custom relay proxy~~ — reworked in 3.8 to bind the GOFF chart's ServiceAccount instead
-- [x] 7.4 ~~`demo-feature-flags` ConfigMap with custom JSON flag definitions~~ — reworked in 3.7 into GOFF flag format
+- [x] 7.2 Write Kustomize base (`deploy/base/`) with `Namespace: demo` and the in-house component manifests only — NATS, ClickHouse, Grafana, and (per 3.5) the GOFF relay proxy are deployed via their vendored charts, not Kustomize. **Update for the rework**: drop `relay-proxy.yaml` from `resources`, keep the flags ConfigMap. (**Section 10** drops relay ConfigMap RBAC from the base / chart extras.)
+- [x] 7.3 ~~ServiceAccount + Role + RoleBinding for the custom relay proxy~~ — reworked in 3.8 for GOFF API retriever; **section 10 removes** ConfigMap-read RBAC entirely (file mount)- [x] 7.4 ~~`demo-feature-flags` ConfigMap with custom JSON flag definitions~~ — reworked in 3.7 into GOFF flag format
 - [x] 7.5 Add readiness/liveness probes to every in-house workload manifest (and confirm the vendored charts' default probes are enabled via `deploy/values/*.yaml`) so dependency-ordering tolerance (Requirement: "Component startup respects dependency ordering") holds regardless of apply order
 - [x] 7.6 Write a `Makefile`/script target that builds all in-house images, `kind load docker-image`s them, runs the `helm install` commands, and runs `kubectl apply -k deploy/base`. **Update for the rework**: two in-house images (backend, frontend) not three, and four chart installs — NATS, ClickHouse, Grafana, GOFF relay proxy.
 - [x] 7.7 Write a teardown target (`kind delete cluster`) as a single documented command
@@ -96,3 +95,19 @@
 - [x] 9.7 Docs: update `README.md` and `README.zh-TW.md` — architecture, flag tables, and verification steps document **only** library-flag proof (flip `otel-nats-tracing` → spans on/off, business path still runs)
 - [x] 9.8 Grafana: update any dashboard panel description that claims per-request `demo-nats-flow` evaluation
 - [x] 9.9 Re-verify: happy path + live toggle of `otel-nats-tracing` only; run backend tests and `openspec validate --strict` for this change
+
+## 10. Feature-flag ladder + ConfigMap volume mount
+
+> Rework after `instrumentation-go` replaced the revoke-only kill switch with the
+> four-step ladder (`relay > env > option > default`) and the demo chose posture
+> **C** (module env explicitly `false`, relay enables). Also switch GOFF from the
+> Kubernetes ConfigMap API retriever to a **volume-mounted** ConfigMap + `kind: file`.
+
+- [x] 10.1 Patch vendored `charts/relay-proxy` Deployment/values to support `extraVolumes` / `extraVolumeMounts` (document the local patch in `SOURCE.txt` or a short NOTES comment)
+- [x] 10.2 Rewrite `deploy/values/relay-proxy.yaml`: `retriever.kind: file`, `path: /flags/flags.yaml`; mount ConfigMap `demo-feature-flags` (key `flags.yaml`) at `/flags` with `optional: true`; keep short `pollingInterval` and `startWithRetrieverError: true`; **remove** Role/RoleBinding `extraManifests` for ConfigMap API reads
+- [x] 10.3 Update `deploy/base/feature-flags-configmap.yaml` comments for ladder semantics (relay authoritative both ways; default variation stays `enabled`)
+- [x] 10.4 Update `deploy/base/backend.yaml`: `OTEL_NATS_TRACING_ENABLED=false`, master switch still `1`, keep `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` + short poll interval; rewrite env comments for option C / zero-code provider path
+- [x] 10.5 Backend tests: rewrite `TestRelayFlagTogglesNatsInstrumentation` with env falsy + relay toggle both ways; replace `TestRelayCannotEnableNatsInstrumentation` with `TestRelayEnablesWhatEnvLeftOff` (and keep a no-relay/env-off silent case if useful)
+- [x] 10.6 Docs: update `README.md` / `README.zh-TW.md` — remove revoke-only / conjunctive-AND wording; document mount + ladder + option C verification steps
+- [ ] 10.7 Re-verify in `kind`: default deploy emits NATS spans with env false; ConfigMap flip disables/re-enables spans without restart; run backend tests and `openspec validate --strict`
+  - Done so far: `go test ./internal/httpapi/` (9 passed), `openspec validate --strict`, `helm template` shows file mount / no Role. **Blocked:** no local `kind` cluster / `demo` namespace — run `make deploy` then flip the ConfigMap when a cluster is available.
