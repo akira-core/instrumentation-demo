@@ -3,5 +3,24 @@
   "private": true,
   "version": "0.0.0",
   "description": "Demo: W3C trace propagation from a JS frontend through a Go backend over NATS, with a Kubernetes-native feature-flag relay proxy.",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "check:npm-compromise": "python3 docs/scripts/check-npm-compromise.py"
+  },
+  "pnpm": {
+    "overrides": {
+      "keyv@6.0.0": "4.5.4",
+      "flat-cache@6.1.24": "4.0.1",
+      "file-entry-cache@11.1.6": "8.0.0",
+      "cacheable-request@13.0.20": "13.0.0",
+      "cacheable@2.5.1": "2.5.0",
+      "@cacheable/memory@2.2.1": "2.2.0",
+      "cache-manager@7.2.10": "7.2.0",
+      "@cacheable/node-cache@3.1.2": "3.1.1",
+      "@cacheable/utils@2.5.1": "2.5.0",
+      "@cacheable/net@2.1.1": "2.1.0",
+      "ecto@5.0.1": "5.0.0"
+    }
+  }
 }
