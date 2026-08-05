@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>otel-nats feature-flag 閘門延遲 — 效能證據報告（繁中）</title>
+  <style>
+    :root {
+      --bg:#0f1419; --surface:#1a2332; --surface-2:#243044; --border:#2d3a4f;
+      --text:#e7ecf3; --muted:#9aa8bc; --accent:#3d9cf0; --ok:#3ecf8e; --warn:#e6a23c;
+      --code-bg:#0b1016; --mono:"JetBrains Mono","SF Mono",ui-monospace,monospace;
+      --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--sans); background:var(--bg); color:var(--text); line-height:1.65; }
+    .layout { display:grid; grid-template-columns:260px 1fr; min-height:100vh; }
+    nav { position:sticky; top:0; height:100vh; overflow:auto; background:var(--surface); border-right:1px solid var(--border); padding:1.25rem 1rem 2rem; }
+    nav .brand { color:var(--accent); font-weight:700; }
+    nav .sub { color:var(--muted); font-size:.75rem; margin:.25rem 0 1rem; }
+    nav h4 { margin:1rem 0 .35rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+    nav ul { list-style:none; padding:0; margin:0; }
+    nav a { display:block; color:var(--muted); text-decoration:none; font-size:.8rem; padding:.3rem .45rem; border-radius:4px; }
+    nav a:hover { background:var(--surface-2); color:var(--text); }
+    main { max-width:980px; padding:2rem 2.25rem 4rem; }
+    h1 { font-size:1.5rem; margin:0 0 .5rem; line-height:1.35; }
+    h2 { margin-top:2.25rem; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+    h3 { margin:.25rem 0; font-size:1.05rem; }
+    h4 { margin:1rem 0 .35rem; color:var(--muted); font-size:.85rem; }
+    .lead,.meta { color:var(--muted); }
+    .case { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.15rem 1.25rem; margin:1rem 0 1.5rem; }
+    pre.code { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.75rem .9rem; overflow:auto; font-family:var(--mono); font-size:.78rem; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+    table { width:100%; border-collapse:collapse; font-size:.88rem; margin:1rem 0; }
+    th, td { border:1px solid var(--border); padding:.45rem .55rem; text-align:left; }
+    th { background:var(--surface-2); }
+    code { font-family:var(--mono); font-size:.85em; color:#9cd1ff; }
+    .callout { background:var(--surface-2); border-left:3px solid var(--accent); padding:.75rem 1rem; margin:1rem 0; border-radius:0 8px 8px 0; }
+    .warn { border-left-color:var(--warn); }
+    .stats { display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0; }
+    .stat { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:.75rem 1rem; min-width:150px; }
+    .stat b { display:block; font-size:1.25rem; }
+    .stat span { color:var(--muted); font-size:.8rem; }
+    .bar-row { display:grid; grid-template-columns:180px 1fr 90px; gap:.6rem; align-items:center; margin:.4rem 0; }
+    .bar-label { font-size:.78rem; }
+    .bar-track { background:var(--code-bg); border:1px solid var(--border); border-radius:4px; height:18px; overflow:hidden; }
+    .bar { height:100%; border-radius:3px; }
+    .bar-val { font-family:var(--mono); font-size:.78rem; text-align:right; color:var(--muted); }
+    footer { color:var(--muted); font-size:.8rem; margin-top:3rem; }
+    @media (max-width:900px) { .layout { grid-template-columns:1fr; } nav { position:relative; height:auto; } .bar-row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav>
+    <div class="brand">otel-nats gate latency</div>
+    <div class="sub">feature flag 閘門 · 各量級 · 證據 · zh-TW</div>
+    <h4>總覽</h4>
+    <a href="#overview">目的與方法</a>
+    <a href="#summary">比較總表</a>
+    <a href="#chart">N=100,000 長條圖</a>
+    <h4>模式</h4>
+    <ul><li><a href="#mode-no_flag_no_env"><code>no_flag_no_env</code></a></li>
+<li><a href="#mode-env_on_no_flag"><code>env_on_no_flag</code></a></li>
+<li><a href="#mode-flag_on"><code>flag_on</code></a></li>
+<li><a href="#mode-flag_off"><code>flag_off</code></a></li></ul>
+    <h4>重跑</h4>
+    <a href="#repro">如何重跑</a>
+  </nav>
+  <main>
+    <h1>otel-nats feature-flag 閘門延遲<br/>效能證據報告</h1>
+    <p class="lead">評估「有開 feature flag（每 call 評估閘門）」相對於「完全不使用 feature flag / env」
+    在大量 Publish 需要送 trace 時，<strong>單次 call 平均 response time</strong> 的差異。
+    量級：N = 100, 1000, 10000, 100000。</p>
+
+    <div class="stats" id="overview">
+      <div class="stat"><b>4</b><span>設定模式</span></div>
+      <div class="stat"><b>4</b><span>請求量級</span></div>
+      <div class="stat"><b>16</b><span>量測結果列</span></div>
+      <div class="stat"><b>2026-08-05T14:33:41Z</b><span>UTC 產生時間</span></div>
+    </div>
+
+    <div class="callout">
+      <strong>量測方法</strong><br/>
+      每模式：warmup 200 次 Publish 後，對 N∈{100,1e3,1e4,1e5} 逐次計時 conn.Publish(ctx, subject, payload)。payload 固定 ~32B。TracerProvider 使用 AlwaysSample + 記憶體 SpanRecorder（不走網路 OTLP）。比較重點：flag_on（每 call OpenFeature）vs env_on_no_flag（有 span 無 OF）vs no_flag_no_env（零閘門）。<br/><br/>
+      主機：<code>darwin/arm64 · go1.26.5 · 14 CPU</code> · payload 30 bytes · library：otel-nats + otel-flags (workspace submodule)
+    </div>
+
+    <div class="callout warn">
+      <strong>解讀重點</strong>
+      <ul>
+        <li><code>no_flag_no_env</code>：零 OpenFeature、不發 span — 下限基準。</li>
+        <li><code>env_on_no_flag</code>：有 span、無 OF — 「需要送 trace」但不走 feature flag 的基準。</li>
+        <li><code>flag_on</code>：每 call 評估 OF 且發 span — 本 demo option C + relay 啟用路徑。</li>
+        <li><code>flag_off</code>：每 call 仍評估 OF，但不發 span — 閘門本身開銷。</li>
+        <li>關鍵比值：<strong>flag_on / env_on_no_flag</strong> = 在同樣要送 trace 時，加上 feature-flag 閘門的倍數成本。</li>
+      </ul>
+    </div>
+
+    <h2 id="summary">比較總表（平均 µs / call）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>N</th>
+          <th>no_flag_no_env<br/><span class="meta">零閘門</span></th>
+          <th>env_on_no_flag<br/><span class="meta">有 span 無 OF</span></th>
+          <th>flag_on<br/><span class="meta">OF+span</span></th>
+          <th>flag_off<br/><span class="meta">OF 無 span</span></th>
+          <th>flag_on − env_on<br/><span class="meta">閘門增量（送 trace）</span></th>
+          <th>flag_on − base<br/><span class="meta">相對零閘門</span></th>
+          <th>flag_off − base<br/><span class="meta">純 OF 評估</span></th>
+        </tr>
+      </thead>
+      <tbody>
+      <tr><td>100</td><td>0.085</td><td>8.22</td><td>8.49</td><td>6.17</td><td>0.271 (1.03×)</td><td>8.41 (100.0×)</td><td>6.09 (72.6×)</td></tr><tr><td>1,000</td><td>0.268</td><td>3.99</td><td>6.63</td><td>3.78</td><td>2.64 (1.66×)</td><td>6.36 (24.7×)</td><td>3.52 (14.1×)</td></tr><tr><td>10,000</td><td>0.188</td><td>3.45</td><td>6.94</td><td>3.63</td><td>3.49 (2.01×)</td><td>6.75 (36.8×)</td><td>3.44 (19.2×)</td></tr><tr><td>100,000</td><td>0.155</td><td>3.40</td><td>7.39</td><td>3.64</td><td>4.00 (2.18×)</td><td>7.24 (47.6×)</td><td>3.49 (23.5×)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="chart">N = 100,000 平均延遲比較</h2>
+    <div class="bar-row"><span class="bar-label"><code>no_flag_no_env</code></span><div class="bar-track"><div class="bar" style="width:2.1%;background:#3ecf8e"></div></div><span class="bar-val">0.155 µs</span></div><div class="bar-row"><span class="bar-label"><code>env_on_no_flag</code></span><div class="bar-track"><div class="bar" style="width:46.0%;background:#3d9cf0"></div></div><span class="bar-val">3.40 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_off</code></span><div class="bar-track"><div class="bar" style="width:49.3%;background:#9aa8bc"></div></div><span class="bar-val">3.64 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_on</code></span><div class="bar-track"><div class="bar" style="width:100.0%;background:#e6a23c"></div></div><span class="bar-val">7.39 µs</span></div>
+
+    <h2 id="modes">各模式逐步設定與證據</h2>
+    
+    <article class="case" id="mode-no_flag_no_env">
+      <header>
+        <h3><code>no_flag_no_env</code> 完全不使用 feature flag / env（零閘門）</h3>
+        <p class="meta">不綁 named provider、不設 OTEL_* 旗標變數。RelayPossible=false，模組預設 off，熱路徑不做 OpenFeature 評估，也不發 span。</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
+2. UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
+3. UNSET OTEL_NATS_TRACING_ENABLED
+4. FlagDomain → NoopProvider
+5. Connect 不加 WithTracingEnabled</pre>
+      <h4>② 各量級平均延遲（µs / call）</h4>
+      <table>
+        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
+        <tbody><tr><td>100</td><td>0.085</td><td>0.083</td><td>0.084</td><td>663,535</td><td>否</td><td>0</td></tr><tr><td>1,000</td><td>0.268</td><td>0.083</td><td>0.166</td><td>2,117,895</td><td>否</td><td>0</td></tr><tr><td>10,000</td><td>0.188</td><td>0.083</td><td>0.125</td><td>3,747,132</td><td>否</td><td>0</td></tr><tr><td>100,000</td><td>0.155</td><td>0.083</td><td>0.125</td><td>4,716,295</td><td>否</td><td>0</td></tr></tbody>
+      </table>
+      <h4>③ 原始結果 JSON 片段</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
+    &quot;n&quot;: 100,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 84.98,
+    &quot;avg_us&quot;: 0.08498,
+    &quot;p50_ns&quot;: 83,
+    &quot;p95_ns&quot;: 84,
+    &quot;p99_ns&quot;: 166,
+    &quot;min_ns&quot;: 41,
+    &quot;max_ns&quot;: 583,
+    &quot;total_ms&quot;: 0.15,
+    &quot;ops_per_sec&quot;: 663534.7824932983,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
+    &quot;n&quot;: 1000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 267.926,
+    &quot;avg_us&quot;: 0.267926,
+    &quot;p50_ns&quot;: 83,
+    &quot;p95_ns&quot;: 166,
+    &quot;p99_ns&quot;: 583,
+    &quot;min_ns&quot;: 41,
+    &quot;max_ns&quot;: 54750,
+    &quot;total_ms&quot;: 0.472,
+    &quot;ops_per_sec&quot;: 2117894.727924654,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
+    &quot;n&quot;: 10000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 188.4039,
+    &quot;avg_us&quot;: 0.18840389999999999,
+    &quot;p50_ns&quot;: 83,
+    &quot;p95_ns&quot;: 125,
+    &quot;p99_ns&quot;: 333,
+    &quot;min_ns&quot;: 41,
+    &quot;max_ns&quot;: 52167,
+    &quot;total_ms&quot;: 2.668,
+    &quot;ops_per_sec&quot;: 3747131.570782566,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
+    &quot;n&quot;: 100000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 155.20068,
+    &quot;avg_us&quot;: 0.15520068,
+    &quot;p50_ns&quot;: 83,
+    &quot;p95_ns&quot;: 125,
+    &quot;p99_ns&quot;: 250,
+    &quot;min_ns&quot;: 0,
+    &quot;max_ns&quot;: 149375,
+    &quot;total_ms&quot;: 21.203,
+    &quot;ops_per_sec&quot;: 4716295.267060927,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  }
+]</pre>
+    </article>
+
+    <article class="case" id="mode-env_on_no_flag">
+      <header>
+        <h3><code>env_on_no_flag</code> 僅 env 開啟 tracing（無 feature flag / 無 OpenFeature）</h3>
+        <p class="meta">OTEL_NATS_TRACING_ENABLED=true，無 named provider。會發 span，但熱路徑不做 OpenFeature 評估（本地 master∧module 布林）。</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
+2. UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED（master 預設 true）
+3. SET OTEL_NATS_TRACING_ENABLED=true
+4. FlagDomain → NoopProvider</pre>
+      <h4>② 各量級平均延遲（µs / call）</h4>
+      <table>
+        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
+        <tbody><tr><td>100</td><td>8.22</td><td>2.25</td><td>20.04</td><td>108,372</td><td>是</td><td>0</td></tr><tr><td>1,000</td><td>3.99</td><td>2.00</td><td>13.67</td><td>241,899</td><td>是</td><td>0</td></tr><tr><td>10,000</td><td>3.45</td><td>1.75</td><td>9.54</td><td>286,127</td><td>是</td><td>0</td></tr><tr><td>100,000</td><td>3.40</td><td>1.71</td><td>8.75</td><td>290,509</td><td>是</td><td>0</td></tr></tbody>
+      </table>
+      <h4>③ 原始結果 JSON 片段</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
+    &quot;n&quot;: 100,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 8224.16,
+    &quot;avg_us&quot;: 8.22416,
+    &quot;p50_ns&quot;: 2250,
+    &quot;p95_ns&quot;: 20042,
+    &quot;p99_ns&quot;: 143125,
+    &quot;min_ns&quot;: 1291,
+    &quot;max_ns&quot;: 148000,
+    &quot;total_ms&quot;: 0.922,
+    &quot;ops_per_sec&quot;: 108371.7149823896,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
+    &quot;n&quot;: 1000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3988.619,
+    &quot;avg_us&quot;: 3.9886190000000004,
+    &quot;p50_ns&quot;: 2000,
+    &quot;p95_ns&quot;: 13667,
+    &quot;p99_ns&quot;: 20542,
+    &quot;min_ns&quot;: 1250,
+    &quot;max_ns&quot;: 212583,
+    &quot;total_ms&quot;: 4.133,
+    &quot;ops_per_sec&quot;: 241898.8674053129,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
+    &quot;n&quot;: 10000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3445.8795,
+    &quot;avg_us&quot;: 3.4458795,
+    &quot;p50_ns&quot;: 1750,
+    &quot;p95_ns&quot;: 9541,
+    &quot;p99_ns&quot;: 21083,
+    &quot;min_ns&quot;: 1000,
+    &quot;max_ns&quot;: 149500,
+    &quot;total_ms&quot;: 34.949,
+    &quot;ops_per_sec&quot;: 286127.1262822072,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
+    &quot;n&quot;: 100000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3397.07609,
+    &quot;avg_us&quot;: 3.39707609,
+    &quot;p50_ns&quot;: 1708,
+    &quot;p95_ns&quot;: 8750,
+    &quot;p99_ns&quot;: 23250,
+    &quot;min_ns&quot;: 875,
+    &quot;max_ns&quot;: 156667,
+    &quot;total_ms&quot;: 344.223,
+    &quot;ops_per_sec&quot;: 290508.9635117198,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  }
+]</pre>
+    </article>
+
+    <article class="case" id="mode-flag_on">
+      <header>
+        <h3><code>flag_on</code> 有 feature flag 且為 enabled（每 call 評估閘門 + 發 span）</h3>
+        <p class="meta">named provider 服務 otel-nats-tracing=true；module env=false（option C 姿勢）。每操作 2 次 OpenFeature Boolean 評估後走 traced 實作。</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. UNSET endpoint（避免真 GOFF）
+2. SET OTEL_NATS_TRACING_ENABLED=false
+3. SetNamedProviderAndWait(FlagDomain) otel-nats-tracing=true
+4. 先裝 provider 再 Connect</pre>
+      <h4>② 各量級平均延遲（µs / call）</h4>
+      <table>
+        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
+        <tbody><tr><td>100</td><td>8.49</td><td>4.92</td><td>16.83</td><td>111,644</td><td>是</td><td>0</td></tr><tr><td>1,000</td><td>6.63</td><td>4.83</td><td>12.75</td><td>148,836</td><td>是</td><td>0</td></tr><tr><td>10,000</td><td>6.94</td><td>5.00</td><td>13.25</td><td>143,162</td><td>是</td><td>0</td></tr><tr><td>100,000</td><td>7.39</td><td>5.08</td><td>14.38</td><td>134,456</td><td>是</td><td>0</td></tr></tbody>
+      </table>
+      <h4>③ 原始結果 JSON 片段</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;flag_on&quot;,
+    &quot;n&quot;: 100,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 8494.99,
+    &quot;avg_us&quot;: 8.49499,
+    &quot;p50_ns&quot;: 4917,
+    &quot;p95_ns&quot;: 16833,
+    &quot;p99_ns&quot;: 94083,
+    &quot;min_ns&quot;: 2750,
+    &quot;max_ns&quot;: 126583,
+    &quot;total_ms&quot;: 0.895,
+    &quot;ops_per_sec&quot;: 111643.52668503574,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_on&quot;,
+    &quot;n&quot;: 1000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 6629.918,
+    &quot;avg_us&quot;: 6.629918,
+    &quot;p50_ns&quot;: 4833,
+    &quot;p95_ns&quot;: 12750,
+    &quot;p99_ns&quot;: 29667,
+    &quot;min_ns&quot;: 2583,
+    &quot;max_ns&quot;: 140166,
+    &quot;total_ms&quot;: 6.718,
+    &quot;ops_per_sec&quot;: 148836.278902517,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_on&quot;,
+    &quot;n&quot;: 10000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 6936.5834,
+    &quot;avg_us&quot;: 6.936583400000001,
+    &quot;p50_ns&quot;: 5000,
+    &quot;p95_ns&quot;: 13250,
+    &quot;p99_ns&quot;: 32583,
+    &quot;min_ns&quot;: 2458,
+    &quot;max_ns&quot;: 160625,
+    &quot;total_ms&quot;: 69.85,
+    &quot;ops_per_sec&quot;: 143161.95921035184,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_on&quot;,
+    &quot;n&quot;: 100000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 7392.84945,
+    &quot;avg_us&quot;: 7.39284945,
+    &quot;p50_ns&quot;: 5083,
+    &quot;p95_ns&quot;: 14375,
+    &quot;p99_ns&quot;: 54917,
+    &quot;min_ns&quot;: 2417,
+    &quot;max_ns&quot;: 190250,
+    &quot;total_ms&quot;: 743.739,
+    &quot;ops_per_sec&quot;: 134455.72490627595,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0
+  }
+]</pre>
+    </article>
+
+    <article class="case" id="mode-flag_off">
+      <header>
+        <h3><code>flag_off</code> 有 feature flag 且為 disabled（每 call 仍評估閘門，不發 span）</h3>
+        <p class="meta">named provider 服務 otel-nats-tracing=false。仍做 OpenFeature 評估，但選 direct 實作、不發 span。</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. SET OTEL_NATS_TRACING_ENABLED=false
+2. SetNamedProviderAndWait(FlagDomain) otel-nats-tracing=false</pre>
+      <h4>② 各量級平均延遲（µs / call）</h4>
+      <table>
+        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
+        <tbody><tr><td>100</td><td>6.17</td><td>3.17</td><td>12.92</td><td>149,561</td><td>否</td><td>0</td></tr><tr><td>1,000</td><td>3.78</td><td>2.29</td><td>8.79</td><td>256,210</td><td>否</td><td>0</td></tr><tr><td>10,000</td><td>3.63</td><td>2.33</td><td>8.29</td><td>272,138</td><td>否</td><td>0</td></tr><tr><td>100,000</td><td>3.64</td><td>2.25</td><td>8.42</td><td>271,169</td><td>否</td><td>0</td></tr></tbody>
+      </table>
+      <h4>③ 原始結果 JSON 片段</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;flag_off&quot;,
+    &quot;n&quot;: 100,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 6170.4,
+    &quot;avg_us&quot;: 6.1704,
+    &quot;p50_ns&quot;: 3166,
+    &quot;p95_ns&quot;: 12916,
+    &quot;p99_ns&quot;: 61625,
+    &quot;min_ns&quot;: 1417,
+    &quot;max_ns&quot;: 103375,
+    &quot;total_ms&quot;: 0.668,
+    &quot;ops_per_sec&quot;: 149560.6655449617,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_off&quot;,
+    &quot;n&quot;: 1000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3784.334,
+    &quot;avg_us&quot;: 3.784334,
+    &quot;p50_ns&quot;: 2292,
+    &quot;p95_ns&quot;: 8791,
+    &quot;p99_ns&quot;: 14083,
+    &quot;min_ns&quot;: 1416,
+    &quot;max_ns&quot;: 90041,
+    &quot;total_ms&quot;: 3.903,
+    &quot;ops_per_sec&quot;: 256210.47793246343,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_off&quot;,
+    &quot;n&quot;: 10000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3625.3048,
+    &quot;avg_us&quot;: 3.6253048,
+    &quot;p50_ns&quot;: 2333,
+    &quot;p95_ns&quot;: 8292,
+    &quot;p99_ns&quot;: 13042,
+    &quot;min_ns&quot;: 1292,
+    &quot;max_ns&quot;: 150958,
+    &quot;total_ms&quot;: 36.746,
+    &quot;ops_per_sec&quot;: 272137.84935934533,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_off&quot;,
+    &quot;n&quot;: 100000,
+    &quot;warmup&quot;: 200,
+    &quot;avg_ns&quot;: 3643.36933,
+    &quot;avg_us&quot;: 3.64336933,
+    &quot;p50_ns&quot;: 2250,
+    &quot;p95_ns&quot;: 8416,
+    &quot;p99_ns&quot;: 14125,
+    &quot;min_ns&quot;: 1291,
+    &quot;max_ns&quot;: 127083,
+    &quot;total_ms&quot;: 368.773,
+    &quot;ops_per_sec&quot;: 271168.8226097571,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0
+  }
+]</pre>
+    </article>
+
+
+    <h2 id="repro">如何重跑</h2>
+    <pre class="code"># 跑效能套件 → docs/evidence/perf/gate-latency.json
+cd backend &amp;&amp; go test ./internal/flagperf/ -v -count=1
+
+# 產生 HTML
+python3 docs/scripts/render-gate-latency-html.py
+
+# 開啟
+open docs/otel-nats-gate-latency.zh-TW.html
+</pre>
+
+    <div class="callout">
+      原始證據：<code>docs/evidence/perf/gate-latency.json</code> ·
+      測試日誌：<code>docs/evidence/perf/gate-latency-test.log</code> ·
+      測試碼：<code>backend/internal/flagperf/gate_latency_test.go</code>
+    </div>
+
+    <footer>
+      這是單機、嵌入式 NATS、記憶體 tracer 的微基準，用來比較<strong>閘門評估</strong>相對量級，
+      不是端到端 HTTP/OTLP 吞吐 SLA。網路 OTLP export、relay 遠端 poll 會另加延遲。
+    </footer>
+  </main>
+</div>
+</body>
+</html>
