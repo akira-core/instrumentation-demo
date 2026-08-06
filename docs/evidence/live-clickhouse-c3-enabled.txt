@@ -1,4 +1,4 @@
-TraceId=5d515aca85a926d50f3c38ab7d77ed65
+TraceId=61b92e6cfbc9516482ff868cfbf87f3d
    ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐
 1. │ POST /api/demo-trace    │ Server   │ demo-backend │
 2. │ send demo.trace.request │ Producer │ demo-backend │
@@ -8,19 +8,19 @@ http_count=1
 nats_spans_cluster_wide_since_probe=4
 --- recent 15 ---
     ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
- 1. │ 2eca6a886727 │ process demo.trace.reply   │ Consumer │
- 2. │ e80f004dcbf0 │ send demo.trace.reply      │ Producer │
- 3. │ e80f004dcbf0 │ process demo.trace.request │ Consumer │
- 4. │ 5d515aca85a9 │ send demo.trace.request    │ Producer │
- 5. │ 5d515aca85a9 │ POST /api/demo-trace       │ Server   │
- 6. │ b50a6c848dd5 │ POST /api/demo-trace       │ Server   │
- 7. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │
- 8. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │
- 9. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │
-10. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │
-11. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │
-12. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │
-13. │ b87b84064cca │ send demo.trace.reply      │ Producer │
-14. │ b87b84064cca │ process demo.trace.request │ Consumer │
-15. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │
+ 1. │ 783adf0d9e9d │ process demo.trace.reply   │ Consumer │
+ 2. │ 8fc85c7ac04a │ send demo.trace.reply      │ Producer │
+ 3. │ 8fc85c7ac04a │ process demo.trace.request │ Consumer │
+ 4. │ 61b92e6cfbc9 │ send demo.trace.request    │ Producer │
+ 5. │ 61b92e6cfbc9 │ POST /api/demo-trace       │ Server   │
+ 6. │ 286864977eb6 │ POST /api/demo-trace       │ Server   │
+ 7. │ b8d309f7625d │ process demo.trace.reply   │ Consumer │
+ 8. │ 923f4c584af9 │ send demo.trace.reply      │ Producer │
+ 9. │ 923f4c584af9 │ process demo.trace.request │ Consumer │
+10. │ f7bad207b227 │ send demo.trace.request    │ Producer │
+11. │ f7bad207b227 │ POST /api/demo-trace       │ Server   │
+12. │ 89b391e40da8 │ process demo.trace.reply   │ Consumer │
+13. │ 252218518a7d │ send demo.trace.reply      │ Producer │
+14. │ 252218518a7d │ process demo.trace.request │ Consumer │
+15. │ 771c9edef21c │ send demo.trace.request    │ Producer │
     └──────────────┴────────────────────────────┴──────────┘

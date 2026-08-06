@@ -21,3 +21,7 @@
 .idea/
 *.tmproj
 .vscode/
+# Development-only files that have no business inside a packaged chart
+tests/
+README.md.gotmpl
+SOURCE.txt

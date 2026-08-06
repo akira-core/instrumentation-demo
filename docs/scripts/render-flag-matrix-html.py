@@ -128,7 +128,7 @@ def main() -> None:
     live_sections: list[str] = []
     for c in live["cases"]:
         steps = """1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」），全程不重啟
-2. kubectl apply ConfigMap demo-feature-flags（本案例的 defaultRule.variation）
+2. kubectl patch ConfigMap relay-proxy-flags（本案例的 defaultRule.variation）
 3. 輪詢 GOFF /v1/feature/otel-nats-tracing/eval 直到 relay 真的服務新的 variation
    （不是固定 sleep — kubelet mount 刷新時間不固定）
 4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，

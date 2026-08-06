@@ -1,9 +1,13 @@
-# Flag definitions in GO Feature Flag's own format. The GOFF relay proxy mounts
-# this ConfigMap as a volume and reads flags.yaml via its file retriever
-# (deploy/values/relay-proxy.yaml) — no Kubernetes API access needed.
+# Flag definitions in GO Feature Flag's own format. The chart turns every file in
+# this directory into a key of the `relay-proxy-flags` ConfigMap, mounts it at
+# /flags, and generates a matching `file` retriever — see `flags.*` in
+# values.yaml. No Kubernetes API access is involved.
 #
 # Edit live during a demo — neither the relay proxy nor the backend restarts:
-#   kubectl edit configmap demo-feature-flags -n demo
+#   kubectl edit configmap relay-proxy-flags -n demo
+#
+# (`helm upgrade` re-renders the ConfigMap from this file, so a live edit lasts
+# until the next upgrade. Edit here for a lasting change.)
 #
 # Library flags only. This demo does not evaluate application-level flags to
 # gate business behavior; the NATS round trip always runs on a successful
@@ -24,20 +28,12 @@
 #
 # Latency is kubelet mount refresh + the relay's pollingInterval (1000 ms in
 # deploy/values/relay-proxy.yaml) + the backend provider's poll interval
-# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s) — a few seconds, not instant.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: demo-feature-flags
-  namespace: demo
-  labels:
-    app.kubernetes.io/name: demo-feature-flags
-    app.kubernetes.io/part-of: demo-trace-propagation-stack
-data:
-  flags.yaml: |
-    otel-nats-tracing:
-      variations:
-        enabled: true
-        disabled: false
-      defaultRule:
-        variation: enabled
+# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s). The kubelet dominates: it
+# refreshes on its own sync period, measured at 53s on kind, so budget ~60s.
+# Only the two poll intervals are ours to shorten.
+otel-nats-tracing:
+  variations:
+    enabled: true
+    disabled: false
+  defaultRule:
+    variation: enabled

@@ -1,1 +1,1 @@
-configmap/demo-feature-flags unchanged
+configmap/relay-proxy-flags patched

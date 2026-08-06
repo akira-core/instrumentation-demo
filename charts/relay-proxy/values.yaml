@@ -14,6 +14,27 @@ relayproxy:
       kind: log
     enableSwagger: true
 #    envVariablePrefix: "GOFFPROXY_"
+
+# -- Flag definitions shipped with the chart, kept one file per concern the way
+# Grafana charts keep one file per dashboard. Every file directly under
+# `flags.dir` becomes a key of a ConfigMap mounted at `flags.mountPath`, and the
+# chart appends one `file` retriever per file to `relayproxy.config` — GO Feature
+# Flag's file retriever takes a single file, not a directory, so the list has to
+# be generated. Templating out an empty directory, or a `relayproxy.config` that
+# already declares its own retriever, is a hard error rather than a silent
+# no-op: a relay proxy that starts with no flags answers every evaluation with
+# the caller's default and looks perfectly healthy while doing it.
+flags:
+  # -- Mount the flag files and generate the retrievers. When false the chart
+  # creates neither, and `relayproxy.config` owns its retriever(s).
+  enabled: false
+  # -- Directory inside the chart holding the flag files. Picks up `*.yaml`,
+  # `*.yml` and `*.json` directly below it; sub-directories are not descended,
+  # because the mounted ConfigMap is flat and equal base names would collide.
+  dir: config
+  # -- Directory the flag files are mounted on inside the container
+  mountPath: /flags
+
 # -- Environment variables to pass to the relay proxy
 env: {}
 # Examples:
@@ -55,8 +76,14 @@ serviceAccount:
   name: ""
 
 pdb:
+  # -- Create a PodDisruptionBudget for the deployment
   enable: false
+  # -- Minimum number of pods that must stay available. Ignored when
+  # `maxUnavailable` is set, since a PDB accepts only one of the two.
   minAvailable: 1
+  # -- Maximum number of pods that may be unavailable. Takes precedence over
+  # `minAvailable` when set.
+  maxUnavailable: ~
 
 # -- Pod annotations to add to the deployment
 podAnnotations: {}
@@ -134,13 +161,6 @@ tolerations: []
 
 # -- Affinity settings for pod assignment to nodes
 affinity: {}
-
-# -- Extra volumes to attach to the relay-proxy pod (local patch; not upstream).
-# Used by this demo to mount the flags ConfigMap for GOFF's file retriever.
-extraVolumes: []
-
-# -- Extra volume mounts for the relay-proxy container (local patch; not upstream).
-extraVolumeMounts: []
 
 # -- Array of extra objects to deploy with the release (evaluated as a template)
 extraManifests: []

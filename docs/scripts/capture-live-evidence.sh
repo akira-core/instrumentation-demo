@@ -107,14 +107,20 @@ nats_count_since() {
 set_flags_cm() {
   local variation="$1" id="$2"
   local out="$EVID/live-configmap-${id}.yaml"
+  # relay-proxy-flags is rendered by the relay proxy chart from
+  # charts/relay-proxy/config/, so Helm owns it through server-side apply.
+  #
+  # This is a merge PATCH rather than `kubectl apply` for that reason. A
+  # client-side `kubectl apply` claims .data.otel-nats-tracing.yaml for the
+  # "kubectl-client-side-apply" field manager, and every later
+  # `helm upgrade relay-proxy` then dies with:
+  #   Apply failed with 1 conflict: conflict with "kubectl-client-side-apply"
+  # A merge patch leaves Helm's field ownership intact, so the next upgrade
+  # simply restores the value from charts/relay-proxy/config/.
   cat >"$out" <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: demo-feature-flags
-  namespace: ${NS}
+# Merge patch applied to ConfigMap relay-proxy-flags in namespace ${NS}.
 data:
-  flags.yaml: |
+  otel-nats-tracing.yaml: |
     otel-nats-tracing:
       variations:
         enabled: true
@@ -122,7 +128,8 @@ data:
       defaultRule:
         variation: ${variation}
 EOF
-  kubectl apply -f "$out" >"$EVID/live-configmap-apply-${id}.txt" 2>&1
+  kubectl -n "$NS" patch configmap relay-proxy-flags --type merge --patch-file "$out" \
+    >"$EVID/live-configmap-apply-${id}.txt" 2>&1
   cat "$EVID/live-configmap-apply-${id}.txt" >&2
 }
 
@@ -322,8 +329,8 @@ kubectl -n "$NS" get deploy backend \
   echo "=== relay-proxy volumes ==="
   kubectl -n "$NS" get deploy relay-proxy -o jsonpath='{.spec.template.spec.volumes}' | python3 -m json.tool
   echo
-  echo "=== current ConfigMap flags.yaml ==="
-  kubectl -n "$NS" get cm demo-feature-flags -o jsonpath='{.data.flags\.yaml}'
+  echo "=== current ConfigMap otel-nats-tracing.yaml ==="
+  kubectl -n "$NS" get cm relay-proxy-flags -o jsonpath='{.data.otel-nats-tracing\.yaml}'
   echo
   echo "=== derived targeting key ==="
   echo "$TARGET_KEY"

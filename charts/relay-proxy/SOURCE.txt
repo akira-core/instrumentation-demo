@@ -14,13 +14,52 @@ Install as:  helm install relay-proxy charts/relay-proxy -f deploy/values/relay-
 
 Upgrading is an explicit re-pull + diff review, never automatic.
 
+Run `make chart-test` (helm-unittest, suites in tests/) after any re-pull: the
+suites exist to catch a local patch below being dropped. A dropped flag mount
+does not fail loudly — the relay proxy starts Ready and answers every evaluation
+with the caller's default.
+
 Local modifications (re-apply after any re-pull — upstream has none of this):
-  - templates/deployment.yaml — honor .Values.extraVolumes / .Values.extraVolumeMounts
-  - values.yaml — declare empty extraVolumes / extraVolumeMounts defaults
-    Reason: mount demo-feature-flags for GOFF kind: file retriever (no ConfigMap API RBAC).
-  - apiKeyAuth.* in values.yaml, templates/vaultsecret.yaml,
+
+  - Flag files: flags.* in values.yaml, config/, templates/flags-configmap.yaml,
+    relay-proxy.flagsConfigMapName / .flagsGlob / .flagRetrievers in
+    templates/_helpers.tpl, the retriever injection and validation at the top of
+    templates/configmap.yaml, the flags volume/volumeMount in
+    templates/deployment.yaml, the "Flag Definition Files" section of
+    README.md(.gotmpl), and tests/flags_test.yaml + tests/flags_validation_test.yaml.
+    Every file in config/ becomes a key of a mounted ConfigMap and gets a
+    generated `file` retriever. Replaces the earlier extraVolumes /
+    extraVolumeMounts patch, which is gone.
+
+  - API keys: apiKeyAuth.* in values.yaml, templates/vaultsecret.yaml,
     relay-proxy.apiKeySecretName / relay-proxy.apiKeyEnv in templates/_helpers.tpl,
     the env block in templates/deployment.yaml, the API-key section in NOTES.txt
     and README.md(.gotmpl), and tests/api_key_auth_test.yaml.
     Gates the relay proxy behind an API key sourced from a VaultSecret; see the
     "API Key Authentication" section of README.md.
+
+Upstream bug fixes (report upstream; drop these once released there):
+
+  - templates/pdb.yaml selected `name: <fullname>`, a label no pod carries, so
+    the PodDisruptionBudget protected nothing. Now uses selectorLabels.
+    Covered by tests/pdb_test.yaml.
+  - values.yaml did not declare pdb.maxUnavailable, which the template and its
+    tests both use.
+  - relay-proxy.monitoringPort in templates/_helpers.tpl pattern-matched the
+    config text, so a commented-out `# monitoringPort: 9999` opened a container
+    port nothing listens on and moved both probes onto it — the pod never became
+    Ready. Now reads the parsed config. Covered by tests/monitoring_port_test.yaml.
+  - templates/configmap.yaml used old-style app/chart/release/heritage labels
+    instead of the chart's own label helper.
+  - templates/ingress.yaml carried extensions/v1beta1 and
+    networking.k8s.io/v1beta1 branches removed in Kubernetes 1.22; Chart.yaml now
+    pins kubeVersion >=1.19 and the ingress template only emits v1.
+  - README.md.gotmpl's "Example without monitoringPort" was byte-identical to the
+    example above it.
+  - .helmignore did not exclude tests/, README.md.gotmpl or SOURCE.txt, so all
+    three shipped inside the packaged chart.
+
+Deliberately NOT changed: the chart's default `resources` still declares
+requests without limits. Adding limits would change the memory and CPU ceiling
+of every existing installation; deploy/values/relay-proxy.yaml sets them for
+this demo instead.

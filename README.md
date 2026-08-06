@@ -50,7 +50,7 @@ the libraries are wired the way production apps should wire them.
 │       └──────────────────► Backend (Go)               Relay proxy (GOFF)    │
 │                                  │  ▲                 ▲                     │
 │                                  │  └─otelnats polls──┘ mounted ConfigMap   │
-│                                  │    (no app code)   │ demo-feature-flags  │
+│                                  │    (no app code)   │ relay-proxy-flags   │
 │                                  ▼                    │ (file retriever)    │
 │                               NATS                    │                     │
 │                                  │                                          │
@@ -307,14 +307,16 @@ This is the **only** flag verification this demo requires. Default deploy alread
 has spans on (relay enables with env off). To disable:
 
 ```sh
-kubectl edit configmap demo-feature-flags -n demo
+kubectl edit configmap relay-proxy-flags -n demo
 # set otel-nats-tracing defaultRule.variation to: disabled
 ```
 
-Wait **~3s** — kubelet refreshes the mounted file, the relay re-reads it
-(`pollingInterval: 1000`), then the backend's provider polls the relay
-(`OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL: 2s`). Then click **Start Trace**
-again.
+Wait **up to ~60s**, then click **Start Trace** again. Three hops have to happen,
+and the first one dominates: kubelet refreshes the mounted file on its own sync
+period (measured at 53s on kind, occasionally longer), the relay re-reads it
+within `pollingInterval: 1000`, and the backend's provider polls the relay every
+`OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL: 2s`. Only the last two are
+configurable here; nothing in this repo shortens the kubelet's.
 
 | Expect | Meaning |
 |---|---|
@@ -345,7 +347,7 @@ should show rotel ingest and dependency health.
 | Success response but no NATS spans, with `otel-nats-tracing` enabled | `otelnats` not wrapping publish/subscribe, relay not reachable yet, or master switch off |
 | Backend fails to connect / config error on retry | Invalid `OTEL_*_ENABLED` value (empty string is an error under the ladder), or unrelated NATS connectivity |
 | NATS never connects, logs a config error on every retry | Invalid flag env value — see `instrumentation-go` feature-flags docs |
-| Flipping `otel-nats-tracing` does nothing | `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` unset, ConfigMap not mounted on relay, or fewer than ~3s elapsed since the edit |
+| Flipping `otel-nats-tracing` does nothing | `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` unset, or the kubelet has not refreshed the mount yet (give it ~60s). A relay with no flag mount can no longer produce this: `flags.enabled` templates the mount and the retrievers together, and `startWithRetrieverError: false` stops the pod instead of serving defaults |
 | Frontend and backend different trace IDs | Missing `traceparent` (CORS / fetch instrumentation / wrong backend URL) |
 | Spans never appear in Grafana | OTLP export path (rotel, port-forward `4318`, ClickHouse) |
 
@@ -353,13 +355,30 @@ should show rotel ingest and dependency health.
 
 ## Feature flags (reference)
 
-The GOFF relay proxy mounts `demo-feature-flags` and reads `flags.yaml` via its
-**file** retriever (no Kubernetes API RBAC). Edit it live — kubelet refreshes
-the mount, the relay re-reads within about a second, and **nothing restarts**:
+Flag definitions live one file per concern under `charts/relay-proxy/config/`.
+The chart turns that directory into the `relay-proxy-flags` ConfigMap, mounts it
+at `/flags`, and generates one **file** retriever per file (no Kubernetes API
+RBAC). Because they ship with the chart, the relay proxy has its flags from its
+first start — nothing waits on `kubectl apply -k deploy/base`.
+
+Edit the ConfigMap live — kubelet refreshes the mount, the relay re-reads within
+about a second, and **nothing restarts**:
 
 ```sh
-kubectl edit configmap demo-feature-flags -n demo
+kubectl edit configmap relay-proxy-flags -n demo
 ```
+
+A live edit lasts until the next `helm upgrade`, which re-renders the ConfigMap
+from `charts/relay-proxy/config/`. Edit the file there for a lasting change, and
+add a new flag by dropping another `.yaml` into the same directory — the chart
+picks it up and extends the retriever list.
+
+One wrinkle worth knowing: Helm owns that ConfigMap through server-side apply,
+so a live edit hands `.data` to the `kubectl` field manager, and the next
+upgrade would abort with a field-ownership conflict. `make helm-install` (and
+therefore `make deploy`) passes `--force-conflicts` on the relay-proxy release
+for exactly this reason, so a demo flip never blocks a redeploy. Running
+`helm upgrade` by hand after a flip needs that flag too.
 
 Environment variables read by `otelnats` itself (demo defaults):
 

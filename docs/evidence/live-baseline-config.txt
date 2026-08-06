@@ -21,20 +21,46 @@ OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s
     {
         "configMap": {
             "defaultMode": 420,
-            "items": [
-                {
-                    "key": "flags.yaml",
-                    "path": "flags.yaml"
-                }
-            ],
-            "name": "demo-feature-flags",
-            "optional": true
+            "name": "relay-proxy-flags"
         },
-        "name": "demo-feature-flags"
+        "name": "relay-proxy-flags-volume"
     }
 ]
 
-=== current ConfigMap flags.yaml ===
+=== current ConfigMap otel-nats-tracing.yaml ===
+# Flag definitions in GO Feature Flag's own format. The chart turns every file in
+# this directory into a key of the `relay-proxy-flags` ConfigMap, mounts it at
+# /flags, and generates a matching `file` retriever — see `flags.*` in
+# values.yaml. No Kubernetes API access is involved.
+#
+# Edit live during a demo — neither the relay proxy nor the backend restarts:
+#   kubectl edit configmap relay-proxy-flags -n demo
+#
+# (`helm upgrade` re-renders the ConfigMap from this file, so a live edit lasts
+# until the next upgrade. Edit here for a lasting change.)
+#
+# Library flags only. This demo does not evaluate application-level flags to
+# gate business behavior; the NATS round trip always runs on a successful
+# demo request.
+#
+#   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
+#                      application code involved. Under instrumentation-go's
+#                      ladder (relay > env > option > default) the relay is
+#                      authoritative in BOTH directions: it can disable tracing
+#                      the deployment left on and enable tracing the deployment
+#                      left off.
+#
+# Demo posture (option C): backend sets OTEL_NATS_TRACING_ENABLED=false and
+# OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1. Default variation below is
+# `enabled`, so out-of-the-box NATS spans appear because the relay enables what
+# the module environment left off. Flip to `disabled` to stop spans; flip back
+# to restore them — no redeploy.
+#
+# Latency is kubelet mount refresh + the relay's pollingInterval (1000 ms in
+# deploy/values/relay-proxy.yaml) + the backend provider's poll interval
+# (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s). The kubelet dominates: it
+# refreshes on its own sync period, measured at 53s on kind, so budget ~60s.
+# Only the two poll intervals are ours to shorten.
 otel-nats-tracing:
   variations:
     enabled: true
@@ -43,4 +69,4 @@ otel-nats-tracing:
     variation: enabled
 
 === derived targeting key ===
-backend-68fb5fdcc5-m26zd-1
+backend-678dff47d5-6mdhj-1

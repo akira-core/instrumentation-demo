@@ -1,9 +1,12 @@
-NAME                                    READY   STATUS    RESTARTS   AGE   IP            NODE                       NOMINATED NODE   READINESS GATES
-backend-68fb5fdcc5-m26zd                1/1     Running   0          23m   10.244.0.17   demo-trace-control-plane   <none>           <none>
-chi-clickhouse-cluster-default-0-0-0    1/1     Running   0          24m   10.244.0.15   demo-trace-control-plane   <none>           <none>
-chk-clickhouse-cluster-cluster1-0-0-0   1/1     Running   0          25m   10.244.0.13   demo-trace-control-plane   <none>           <none>
-clickhouse-operator-55b7499cff-xmd7v    2/2     Running   0          26m   10.244.0.9    demo-trace-control-plane   <none>           <none>
-nats-0                                  3/3     Running   0          27m   10.244.0.7    demo-trace-control-plane   <none>           <none>
-nats-box-7445dcb64c-8l649               1/1     Running   0          27m   10.244.0.5    demo-trace-control-plane   <none>           <none>
-relay-proxy-7f784455f9-pzgl2            1/1     Running   0          23m   10.244.0.16   demo-trace-control-plane   <none>           <none>
-rotel-7657f69bf8-x6ldj                  1/1     Running   0          26m   10.244.0.10   demo-trace-control-plane   <none>           <none>
+NAME                                    READY   STATUS    RESTARTS   AGE     IP            NODE                       NOMINATED NODE   READINESS GATES
+backend-678dff47d5-6mdhj                1/1     Running   0          8m27s   10.244.0.19   demo-trace-control-plane   <none>           <none>
+chi-clickhouse-cluster-default-0-0-0    1/1     Running   0          9m9s    10.244.0.15   demo-trace-control-plane   <none>           <none>
+chk-clickhouse-cluster-cluster1-0-0-0   1/1     Running   0          9m33s   10.244.0.13   demo-trace-control-plane   <none>           <none>
+clickhouse-operator-b7d98c9d4-qk572     2/2     Running   0          10m     10.244.0.9    demo-trace-control-plane   <none>           <none>
+frontend-6594b5b764-hr6g2               1/1     Running   0          8m27s   10.244.0.20   demo-trace-control-plane   <none>           <none>
+grafana-79b965d8bd-9t26b                1/1     Running   0          8m28s   10.244.0.16   demo-trace-control-plane   <none>           <none>
+nats-0                                  3/3     Running   0          10m     10.244.0.8    demo-trace-control-plane   <none>           <none>
+nats-box-7db7ffb587-c94js               1/1     Running   0          10m     10.244.0.5    demo-trace-control-plane   <none>           <none>
+relay-proxy-6596f98c67-kfckd            1/1     Running   0          3m16s   10.244.0.22   demo-trace-control-plane   <none>           <none>
+rotel-5566779b79-98cts                  1/1     Running   0          10m     10.244.0.10   demo-trace-control-plane   <none>           <none>
+victoria-metrics-0                      1/1     Running   0          8m27s   10.244.0.21   demo-trace-control-plane   <none>           <none>

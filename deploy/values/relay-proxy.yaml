@@ -9,9 +9,15 @@
 # installs its own OpenFeature provider against (see the backend manifest's
 # OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT; no backend code reads it).
 #
-# Flags are NOT defined here. They live in the demo-feature-flags ConfigMap
-# (deploy/base/feature-flags-configmap.yaml), volume-mounted below, and read by
-# GOFF's file retriever. No ConfigMap API RBAC is required.
+# Flags are NOT defined here either. They live one-file-per-concern under
+# charts/relay-proxy/config/, which the chart turns into the `relay-proxy-flags`
+# ConfigMap, mounts at /flags, and points a generated `file` retriever at. No
+# ConfigMap API RBAC is required.
+
+# Ship the flag files in charts/relay-proxy/config/ and let the chart generate
+# the matching retrievers — hence no `retriever:` block in the config below.
+flags:
+  enabled: true
 
 relayproxy:
   config: |
@@ -24,29 +30,25 @@ relayproxy:
       # so the pod's readiness now depends on it being served correctly.
       monitoringPort: 1032
 
-    # How often GOFF re-reads the mounted flags file, in ms. Deliberately short
-    # (1s) so a `kubectl edit configmap demo-feature-flags` reaches the relay's
-    # own view quickly (after kubelet refreshes the mount). This is only the
-    # first of two hops: otelnats's provider evaluates in-process and polls this
-    # relay every OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in this demo),
-    # so an operator sees a flip take effect within a few seconds, not instantly.
+    # How often GOFF re-reads the mounted flag files, in ms. Deliberately short
+    # (1s) so a `kubectl edit configmap relay-proxy-flags` reaches the relay's
+    # own view as soon as kubelet has refreshed the mount. This is only the
+    # first of two hops we control: otelnats's provider evaluates in-process and
+    # polls this relay every OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in
+    # this demo). Neither is the bottleneck — the kubelet's own ConfigMap sync
+    # period is, measured at 53s on kind. Budget ~60s for a flip to land.
     pollingInterval: 1000
 
-    # Start even if the mounted flags file is not readable yet, rather than
-    # crash-looping. `helm install` runs before `kubectl apply -k deploy/base`
-    # (which creates the ConfigMap), and the volume is optional — see
-    # kind-cluster-deployment. While the retriever has nothing, evaluations
-    # return the caller's default and the local ladder below the relay decides.
-    startWithRetrieverError: true
+    # Fail loudly if the flag files are unreadable. This used to be true because
+    # the ConfigMap was created by a later `kubectl apply -k deploy/base` and the
+    # pod could legitimately start before it existed. The flags now install with
+    # the chart, so the mount is populated from the pod's very first start and an
+    # unreadable retriever is a real defect — one that, tolerated, produces a
+    # relay proxy that is Ready and answers every evaluation with the caller's
+    # default.
+    startWithRetrieverError: false
 
     logLevel: info
-
-    # File retriever over the volume-mounted ConfigMap (directory mount, not
-    # subPath, so kubelet refreshes on ConfigMap edit). Path matches
-    # extraVolumeMounts below.
-    retriever:
-      kind: file
-      path: /flags/flags.yaml
 
     # Evaluation results are logged rather than shipped anywhere — this is a
     # local demo, and no flag-analytics backend exists in the stack.
@@ -79,22 +81,5 @@ resources:
 serviceAccount:
   create: true
 
-# Mount demo-feature-flags (created by deploy/base) at /flags. optional: true
-# so the pod can start before k8s-apply creates the ConfigMap; GOFF then picks
-# up the file once kubelet populates the mount.
-extraVolumes:
-  - name: demo-feature-flags
-    configMap:
-      name: demo-feature-flags
-      optional: true
-      items:
-        - key: flags.yaml
-          path: flags.yaml
-
-extraVolumeMounts:
-  - name: demo-feature-flags
-    mountPath: /flags
-    readOnly: true
-
-# No ConfigMap API Role/RoleBinding — flags come from the mount above.
+# No ConfigMap API Role/RoleBinding — flags come from the chart-managed mount.
 extraManifests: []

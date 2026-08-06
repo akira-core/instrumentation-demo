@@ -1,0 +1,18 @@
+{{- if .Values.flags.enabled }}
+{{- /*
+Flag definitions, one ConfigMap key per file found under `flags.dir` inside the
+chart. configmap.yaml generates a matching `file` retriever for each of them.
+
+Deliberately NOT wired into a `checksum/` annotation on the deployment: GO
+Feature Flag re-reads the mounted files every `pollingInterval`, so a flag
+change must not roll the pod.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "relay-proxy.flagsConfigMapName" . }}
+  labels:
+    {{- include "relay-proxy.labels" . | nindent 4 }}
+data:
+{{ (.Files.Glob (include "relay-proxy.flagsGlob" .)).AsConfig | indent 2 }}
+{{- end }}

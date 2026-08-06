@@ -74,15 +74,23 @@ tests:
           path: spec.maxUnavailable
           value: 1
 
-  - it: should set correct selector labels
+  # The selector has to match the labels the pods actually carry. It used to be
+  # `name: <fullname>`, which no pod has, so the PDB selected nothing and
+  # protected nothing while looking correctly configured.
+  - it: should select the pods it is meant to protect
     set:
       pdb.enable: true
       pdb.minAvailable: 1
       fullnameOverride: my-relay-proxy
     asserts:
       - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
+          value: relay-proxy
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+      - isNull:
           path: spec.selector.matchLabels.name
-          value: my-relay-proxy
 
   - it: should only set maxUnavailable when minAvailable is false/0
     set:

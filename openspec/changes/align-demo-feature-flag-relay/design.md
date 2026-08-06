@@ -48,6 +48,8 @@ retriever:
 
 Vendored chart supports `extraVolumes` / `extraVolumeMounts`. Mount is a directory (not `subPath`) so kubelet refreshes on edit. `optional: true` + `startWithRetrieverError: true` tolerate helm-before-k8s-apply.
 
+- **Superseded**: replaced by the chart's `flags.*` values. Flag files live under `charts/relay-proxy/config/`, and the chart renders the ConfigMap, the mount and one `file` retriever per file together, so they cannot drift apart. The mount is still a directory rather than a `subPath`, for the same kubelet-refresh reason. `optional: true` and `startWithRetrieverError: true` are gone: the flags install with the chart, so there is no helm-before-k8s-apply window left to tolerate, and `startWithRetrieverError` is now `false`.
+
 ### 3. Tests install on the named domain
 
 `openfeature.SetNamedProviderAndWait("otel-instrumentation-go", …)` before NATS connect. Cover: toggle both ways with env false; relay enables what env left off; no-relay + env off emits no NATS spans.
