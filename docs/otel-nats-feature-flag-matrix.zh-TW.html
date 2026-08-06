@@ -99,13 +99,13 @@
   <main>
     <h1>otel-nats 功能旗標閘門與回退組合<br/>測試證據報告</h1>
     <p class="lead">每個案例都記錄：<strong>你改了什麼設定</strong> → <strong>預期</strong> → <strong>API / 測試 / ClickHouse 證據</strong> → <strong>是否通過</strong>。
-    證據時間（UTC）：單元 <code>2026-08-06T00:51:33Z</code> · 叢集 <code>2026-08-05T14:07:49Z</code>。</p>
+    證據時間（UTC）：單元 <code>2026-08-06T01:47:41Z</code> · 叢集 <code>2026-08-06T02:36:56Z</code>。</p>
 
     <div class="stats" id="overview">
       <div class="stat"><b>29/29</b><span>單元矩陣通過</span></div>
       <div class="stat"><b>3/3</b><span>叢集實測通過</span></div>
       <div class="stat"><b>0</b><span>單元失敗數</span></div>
-      <div class="stat"><b>docker-desktop</b><span>kubectl context</span></div>
+      <div class="stat"><b>kind-demo-trace</b><span>kubectl context</span></div>
     </div>
 
     <div class="callout">
@@ -144,7 +144,7 @@ OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
 OTEL_NATS_TRACING_ENABLED=false
 OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=http://relay-proxy:1031
 OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s</pre>
-    <p class="meta">ConfigMap volume 刷新約 60–75s；relay pollingInterval=1s；provider poll=2s</p>
+    <p class="meta">每個 case 都是輪詢到條件成立（或用盡重試）才記錄，不是固定 sleep。C2 額外查「本次探測開始之後」全叢集的 demo.trace span 數（每次嘗試各自取一個 ClickHouse 端時間點），用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。</p>
 
     <h2 id="summary-table">結果總表</h2>
     <h3>單元矩陣</h3>
@@ -159,7 +159,7 @@ OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s</pre>
     <table>
       <thead><tr><th>ID</th><th>標題</th><th>relay value</th><th>NATS</th><th>HTTP</th><th>結果</th></tr></thead>
       <tbody>
-      <tr><td><a href='#live-C1'><code>C1</code></a></td><td>option C 預設：env=false + ConfigMap enabled → 有 NATS span</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C2'><code>C2</code></a></td><td>ConfigMap → disabled：HTTP 成功、NATS span=0</td><td>False</td><td>0</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C3'><code>C3</code></a></td><td>ConfigMap → enabled：NATS span 恢復</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr>
+      <tr><td><a href='#live-C1'><code>C1</code></a></td><td>option C 預設：env=false + ConfigMap enabled → 有 NATS span</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C2'><code>C2</code></a></td><td>ConfigMap → disabled：HTTP 成功、NATS span=0（全叢集時間窗亦為 0）</td><td>False</td><td>0</td><td>1</td><td>✅</td></tr><tr><td><a href='#live-C3'><code>C3</code></a></td><td>ConfigMap → enabled：NATS span 恢復</td><td>True</td><td>1</td><td>1</td><td>✅</td></tr>
       </tbody>
     </table>
 
@@ -168,7 +168,7 @@ OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s</pre>
     <article class="case" id="unit-L01">
       <header>
         <h3><code>L01</code> 全未設定 → 關閉（模組預設 false） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 2 ms · 2026-08-06T00:51:33.679721345Z</p>
+        <p class="meta">類別：local · 耗時 31 ms · 2026-08-06T01:47:40.903671507Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 清除 OTEL_INSTRUMENTATION_GO_TRACING_ENABLED
@@ -201,7 +201,7 @@ pass: True</pre>
     <article class="case" id="unit-L02">
       <header>
         <h3><code>L02</code> 僅 master=true → 仍關閉（veto 不是啟用開關） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 1 ms · 2026-08-06T00:51:33.682740692Z</p>
+        <p class="meta">類別：local · 耗時 36 ms · 2026-08-06T01:47:40.942431068Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 設定 OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=true
@@ -233,7 +233,7 @@ pass: True</pre>
     <article class="case" id="unit-L03">
       <header>
         <h3><code>L03</code> 僅 module env=true → 開啟（master 預設 true） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 1 ms · 2026-08-06T00:51:33.684054339Z</p>
+        <p class="meta">類別：local · 耗時 9 ms · 2026-08-06T01:47:40.979539918Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 清除 master env
@@ -264,7 +264,7 @@ pass: True</pre>
     <article class="case" id="unit-L04">
       <header>
         <h3><code>L04</code> WithTracingEnabled(true)、env 沉默 → 開啟 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 0 ms · 2026-08-06T00:51:33.685484663Z</p>
+        <p class="meta">類別：local · 耗時 10 ms · 2026-08-06T01:47:41.002233489Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 清除 module / master env
@@ -295,7 +295,7 @@ pass: True</pre>
     <article class="case" id="unit-L05">
       <header>
         <h3><code>L05</code> WithTracingEnabled(false)、env 沉默 → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 0 ms · 2026-08-06T00:51:33.686481522Z</p>
+        <p class="meta">類別：local · 耗時 17 ms · 2026-08-06T01:47:41.017214518Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 清除 module / master env
@@ -326,7 +326,7 @@ pass: True</pre>
     <article class="case" id="unit-L06">
       <header>
         <h3><code>L06</code> env=false 勝過 option=true → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 0 ms · 2026-08-06T00:51:33.68735565Z</p>
+        <p class="meta">類別：local · 耗時 26 ms · 2026-08-06T01:47:41.037088061Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=false
@@ -357,7 +357,7 @@ pass: True</pre>
     <article class="case" id="unit-L07">
       <header>
         <h3><code>L07</code> env=true 勝過 option=false → 開啟 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 0 ms · 2026-08-06T00:51:33.688178246Z</p>
+        <p class="meta">類別：local · 耗時 49 ms · 2026-08-06T01:47:41.065142768Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=true
@@ -388,7 +388,7 @@ pass: True</pre>
     <article class="case" id="unit-L08">
       <header>
         <h3><code>L08</code> master env 否決：module 與 option 皆 on → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 1 ms · 2026-08-06T00:51:33.689089568Z</p>
+        <p class="meta">類別：local · 耗時 27 ms · 2026-08-06T01:47:41.11491494Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=false
@@ -420,7 +420,7 @@ pass: True</pre>
     <article class="case" id="unit-L09">
       <header>
         <h3><code>L09</code> module env 真值 token「1」→ 開啟 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 1 ms · 2026-08-06T00:51:33.690369348Z</p>
+        <p class="meta">類別：local · 耗時 26 ms · 2026-08-06T01:47:41.143759724Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=1</pre>
@@ -450,7 +450,7 @@ pass: True</pre>
     <article class="case" id="unit-L10">
       <header>
         <h3><code>L10</code> module env 假值 token「off」→ 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：local · 耗時 1 ms · 2026-08-06T00:51:33.691870948Z</p>
+        <p class="meta">類別：local · 耗時 27 ms · 2026-08-06T01:47:41.170857719Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=off</pre>
@@ -480,7 +480,7 @@ pass: True</pre>
     <article class="case" id="unit-E01">
       <header>
         <h3><code>E01</code> module env 空字串 → 建構錯誤 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T00:51:33.693250087Z</p>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T01:47:41.201617927Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. export OTEL_NATS_TRACING_ENABLED=&quot;&quot;</pre>
@@ -511,7 +511,7 @@ pass: True</pre>
     <article class="case" id="unit-E02">
       <header>
         <h3><code>E02</code> module env 無法辨識「enabled」→ 建構錯誤 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T00:51:33.693425747Z</p>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T01:47:41.202502756Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=enabled</pre>
@@ -542,7 +542,7 @@ pass: True</pre>
     <article class="case" id="unit-E03">
       <header>
         <h3><code>E03</code> master env 無法辨識「yes-please」→ 建構錯誤 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T00:51:33.693569929Z</p>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T01:47:41.203215991Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=yes-please
@@ -574,7 +574,7 @@ pass: True</pre>
     <article class="case" id="unit-V01">
       <header>
         <h3><code>V01</code> _ENDPOINT 缺 scheme/host（relay:1031）→ 建構錯誤 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T00:51:33.693715539Z</p>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T01:47:41.205092245Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=relay:1031
@@ -607,7 +607,7 @@ pass: True</pre>
     <article class="case" id="unit-V02">
       <header>
         <h3><code>V02</code> _POLL_INTERVAL 是裸整數（60）→ 建構錯誤 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T00:51:33.693859677Z</p>
+        <p class="meta">類別：invalid · 耗時 0 ms · 2026-08-06T01:47:41.209059622Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=60
@@ -639,7 +639,7 @@ pass: True</pre>
     <article class="case" id="unit-R01">
       <header>
         <h3><code>R01</code> relay 啟用 module、env 沉默 → 開啟（可補上部署未開的 tracing） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 4 ms · 2026-08-06T00:51:33.69400117Z</p>
+        <p class="meta">類別：relay · 耗時 9 ms · 2026-08-06T01:47:41.20968216Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 清除 env
@@ -673,7 +673,7 @@ pass: True</pre>
     <article class="case" id="unit-R02">
       <header>
         <h3><code>R02</code> relay 關閉 module、env=true → 關閉（relay 雙向權威） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-06T00:51:33.698228728Z</p>
+        <p class="meta">類別：relay · 耗時 20 ms · 2026-08-06T01:47:41.222946766Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=true
@@ -706,7 +706,7 @@ pass: True</pre>
     <article class="case" id="unit-R03">
       <header>
         <h3><code>R03</code> option C：env=false + relay=true → 開啟（本 demo 預設姿勢） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-06T00:51:33.699302047Z</p>
+        <p class="meta">類別：relay · 耗時 36 ms · 2026-08-06T01:47:41.243958431Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
@@ -740,7 +740,7 @@ pass: True</pre>
     <article class="case" id="unit-R04">
       <header>
         <h3><code>R04</code> option C 翻轉：env=false + relay=false → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 8 ms · 2026-08-06T00:51:33.700263423Z</p>
+        <p class="meta">類別：relay · 耗時 18 ms · 2026-08-06T01:47:41.280958246Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=false
@@ -773,7 +773,7 @@ pass: True</pre>
     <article class="case" id="unit-R05">
       <header>
         <h3><code>R05</code> relay master 否決：module relay on + option true → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 1 ms · 2026-08-06T00:51:33.708573623Z</p>
+        <p class="meta">類別：relay · 耗時 27 ms · 2026-08-06T01:47:41.300424826Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. relay otel-instrumentation-go-tracing=false
@@ -809,7 +809,7 @@ pass: True</pre>
     <article class="case" id="unit-R06">
       <header>
         <h3><code>R06</code> master env 否決勝過 enabling relay → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 1 ms · 2026-08-06T00:51:33.709989256Z</p>
+        <p class="meta">類別：relay · 耗時 8 ms · 2026-08-06T01:47:41.330070358Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=false
@@ -842,7 +842,7 @@ pass: True</pre>
     <article class="case" id="unit-R07">
       <header>
         <h3><code>R07</code> option=true 仍服從 relay 關閉 → 關閉（不 pin） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 8 ms · 2026-08-06T00:51:33.711627029Z</p>
+        <p class="meta">類別：relay · 耗時 36 ms · 2026-08-06T01:47:41.354749109Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. WithTracingEnabled(true)
@@ -875,7 +875,7 @@ pass: True</pre>
     <article class="case" id="unit-R08">
       <header>
         <h3><code>R08</code> option=false 仍服從 relay 開啟 → 開啟 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 1 ms · 2026-08-06T00:51:33.720155744Z</p>
+        <p class="meta">類別：relay · 耗時 16 ms · 2026-08-06T01:47:41.392337214Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. WithTracingEnabled(false)
@@ -908,7 +908,7 @@ pass: True</pre>
     <article class="case" id="unit-R09">
       <header>
         <h3><code>R09</code> provider 存在但無 key + env=false + option=true → env 勝 option <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-06T00:51:33.721585493Z</p>
+        <p class="meta">類別：relay · 耗時 20 ms · 2026-08-06T01:47:41.409378634Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. 綁定 named provider 但不定義任何 flag key
@@ -940,7 +940,7 @@ pass: True</pre>
     <article class="case" id="unit-R10">
       <header>
         <h3><code>R10</code> 無 provider + module env=true → 僅 env 路徑開啟 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-06T00:51:33.722612733Z</p>
+        <p class="meta">類別：relay · 耗時 15 ms · 2026-08-06T01:47:41.43109525Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. FlagDomain 綁 NoopProvider
@@ -971,7 +971,7 @@ pass: True</pre>
     <article class="case" id="unit-R11">
       <header>
         <h3><code>R11</code> 只裝 default slot 的 provider 不算 relay → 關閉 <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：relay · 耗時 0 ms · 2026-08-06T00:51:33.723699051Z</p>
+        <p class="meta">類別：relay · 耗時 7 ms · 2026-08-06T01:47:41.453142658Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. openfeature.SetProviderAndWait(DEFAULT slot) 且 otel-nats-tracing=true
@@ -1006,7 +1006,7 @@ pass: True</pre>
     <article class="case" id="unit-D01">
       <header>
         <h3><code>D01</code> 連線後翻 relay：on → off → on（不重連） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：dynamic · 耗時 18 ms · 2026-08-06T00:51:33.724524164Z</p>
+        <p class="meta">類別：dynamic · 耗時 103 ms · 2026-08-06T01:47:41.470435136Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. OTEL_NATS_TRACING_ENABLED=false（option C 姿勢）
@@ -1049,7 +1049,7 @@ pass: True</pre>
     <article class="case" id="unit-D02">
       <header>
         <h3><code>D02</code> 連線後 relay master 否決 → 關閉（module key 不變） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：dynamic · 耗時 4 ms · 2026-08-06T00:51:33.743074442Z</p>
+        <p class="meta">類別：dynamic · 耗時 63 ms · 2026-08-06T01:47:41.574372515Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. relay otel-nats-tracing=true，Connect 後為開啟
@@ -1093,7 +1093,7 @@ pass: True</pre>
     <article class="case" id="unit-D03">
       <header>
         <h3><code>D03</code> 無 relay 的連線不受後來綁上的 provider 影響（建構時已定案） <span class="badge ok">通過</span></h3>
-        <p class="meta">類別：dynamic · 耗時 1 ms · 2026-08-06T00:51:33.747782347Z</p>
+        <p class="meta">類別：dynamic · 耗時 20 ms · 2026-08-06T01:47:41.638411488Z</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. FlagDomain 綁 NoopProvider、env 全清 → RelayPossible=false
@@ -1129,14 +1129,14 @@ pass: True</pre>
 
 
     <h2 id="live">叢集實測詳情</h2>
-    <div class="callout warn"><strong>叢集證據早於腳本改版</strong><br/>下方 live 案例是舊版 <code>capture-live-evidence.sh</code>（固定 sleep 75 秒、以 grep 解析 ClickHouse 表格輸出、無全叢集時間窗查詢）產生的，缺少 <code>attempts</code> 與 <code>nats_spans_cluster_wide_last_2min</code> 欄位。「① 設定步驟」描述的是<strong>現在</strong>腳本的做法。要讓兩者一致，需對 <code>demo</code> namespace 重跑 <code>./docs/scripts/capture-live-evidence.sh</code>。</div>
+    
     
     <article class="case" id="live-C1">
       <header>
         <h3><code>C1</code> option C 預設：env=false + ConfigMap enabled → 有 NATS span <span class="badge ok">通過</span></h3>
-        <p class="meta">traceId=<code>b4ba70128760c34ae4bf15322ddaf167</code> · nats=1 · http=1
-        · 全叢集近 2 分鐘 NATS span=n/a
-        · 收斂用了 n/a 次嘗試</p>
+        <p class="meta">traceId=<code>0beefe8b6f4b048d40dc5cb0c6b230d0</code> · nats=1 · http=1
+        · 本次探測後全叢集 NATS span=4
+        · 收斂用了 1 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」），全程不重啟
@@ -1146,7 +1146,9 @@ pass: True</pre>
 4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，
    直到結果符合預期或用盡重試（attempts 欄位記錄實際用了幾次）
 5. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;（TabSeparated 取純數字）
-6. 停用案例額外查全叢集最近 2 分鐘的 demo.trace span 數，
+6. 停用案例額外查「本次探測開始之後」全叢集的 demo.trace span 數
+   （每次嘗試各自向 ClickHouse 取一個時間點，不是固定往回看的時間窗 ——
+   往回看的窗會含到上一個案例的 span，等於讓案例之間有隱性的時間相依）
    用來區分「tracing 被關掉」與「propagation 壞掉、span 落在別條 trace」</pre>
       <h4>② Relay eval API 回應</h4>
       <pre class="code">{
@@ -1159,53 +1161,55 @@ pass: True</pre>
   &quot;value&quot;: true,
   &quot;cacheable&quot;: true
 }</pre>
-      
+      <p class="meta">targeting key 由 backend pod 名稱推導（otel-flags 送的是 &lt;hostname&gt;-&lt;pid&gt;）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。</p>
       <h4>③ Demo API 回應</h4>
       <pre class="code">{
-  &quot;traceId&quot;: &quot;b4ba70128760c34ae4bf15322ddaf167&quot;,
-  &quot;spanId&quot;: &quot;86a522769267ed10&quot;
+  &quot;traceId&quot;: &quot;0beefe8b6f4b048d40dc5cb0c6b230d0&quot;,
+  &quot;spanId&quot;: &quot;994dc41755b6b9d5&quot;
 }</pre>
       <h4>④ ClickHouse 查詢結果</h4>
-      <pre class="code">TraceId=b4ba70128760c34ae4bf15322ddaf167
-   ┌─SpanName────────────────┬─SpanKind─┐
-1. │ POST /api/demo-trace    │ Server   │
-2. │ send demo.trace.request │ Producer │
-   └─────────────────────────┴──────────┘
+      <pre class="code">TraceId=0beefe8b6f4b048d40dc5cb0c6b230d0
+   ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐
+1. │ POST /api/demo-trace    │ Server   │ demo-backend │
+2. │ send demo.trace.request │ Producer │ demo-backend │
+   └─────────────────────────┴──────────┴──────────────┘
 nats_count=1
 http_count=1
+nats_spans_cluster_wide_since_probe=4
 --- recent 15 ---
     ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
- 1. │ 2daca0a54b6d │ process demo.trace.reply   │ Consumer │
- 2. │ 97ea4e4f4d85 │ send demo.trace.reply      │ Producer │
- 3. │ 97ea4e4f4d85 │ process demo.trace.request │ Consumer │
- 4. │ b4ba70128760 │ send demo.trace.request    │ Producer │
- 5. │ 0b886256e5f5 │ HTTP POST                  │ Client   │
- 6. │ b4ba70128760 │ POST /api/demo-trace       │ Server   │
- 7. │ 681c3b67d56a │ process demo.trace.reply   │ Consumer │
- 8. │ c558faf37dfb │ send demo.trace.reply      │ Producer │
- 9. │ c558faf37dfb │ process demo.trace.request │ Consumer │
-10. │ 4f8675fbbf20 │ send demo.trace.request    │ Producer │
-11. │ c7543b98caa5 │ HTTP POST                  │ Client   │
-12. │ 4f8675fbbf20 │ POST /api/demo-trace       │ Server   │
-13. │ 5d440e79ec06 │ HTTP POST                  │ Client   │
-14. │ 85c3d30e7eb4 │ POST /api/demo-trace       │ Server   │
-15. │ a6e1e6471a05 │ process demo.trace.reply   │ Consumer │
-    └──────────────┴────────────────────────────┴──────────┘</pre>
+ 1. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │
+ 2. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │
+ 3. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │
+ 4. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │
+ 5. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │
+ 6. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │
+ 7. │ b87b84064cca │ send demo.trace.reply      │ Producer │
+ 8. │ b87b84064cca │ process demo.trace.request │ Consumer │
+ 9. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │
+10. │ 59dbb7e87b6a │ POST /api/demo-trace       │ Server   │
+11. │ 1a1f60bb65d1 │ POST /api/demo-trace       │ Server   │
+12. │ 3ebf9c892d31 │ process demo.trace.reply   │ Consumer │
+13. │ eef8e076733e │ send demo.trace.reply      │ Producer │
+14. │ eef8e076733e │ process demo.trace.request │ Consumer │
+15. │ 64917f35628a │ send demo.trace.request    │ Producer │
+    └──────────────┴────────────────────────────┴──────────┘
+</pre>
       <h4>⑤ 證據檔案（docs/evidence/）</h4>
       <pre class="code">{
-  &quot;apply&quot;: &quot;live-step-c1-apply.txt&quot;,
-  &quot;relay&quot;: &quot;live-step-c1-relay.json&quot;,
-  &quot;api&quot;: &quot;live-step-c1-api.json&quot;,
-  &quot;clickhouse&quot;: &quot;live-step-c1-clickhouse.txt&quot;
+  &quot;apply&quot;: &quot;live-configmap-apply-c1-enabled.txt&quot;,
+  &quot;relay&quot;: &quot;live-relay-eval-c1-enabled.json&quot;,
+  &quot;api&quot;: &quot;live-step-c1-enabled-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-clickhouse-c1-enabled.txt&quot;
 }</pre>
     </article>
 
     <article class="case" id="live-C2">
       <header>
-        <h3><code>C2</code> ConfigMap → disabled：HTTP 成功、NATS span=0 <span class="badge ok">通過</span></h3>
-        <p class="meta">traceId=<code>81be78258c3fa1f0409189b04904426d</code> · nats=0 · http=1
-        · 全叢集近 2 分鐘 NATS span=n/a
-        · 收斂用了 n/a 次嘗試</p>
+        <h3><code>C2</code> ConfigMap → disabled：HTTP 成功、NATS span=0（全叢集時間窗亦為 0） <span class="badge ok">通過</span></h3>
+        <p class="meta">traceId=<code>b50a6c848dd5c1ff57821152bc7c1ac1</code> · nats=0 · http=1
+        · 本次探測後全叢集 NATS span=0
+        · 收斂用了 1 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」），全程不重啟
@@ -1215,7 +1219,9 @@ http_count=1
 4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，
    直到結果符合預期或用盡重試（attempts 欄位記錄實際用了幾次）
 5. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;（TabSeparated 取純數字）
-6. 停用案例額外查全叢集最近 2 分鐘的 demo.trace span 數，
+6. 停用案例額外查「本次探測開始之後」全叢集的 demo.trace span 數
+   （每次嘗試各自向 ClickHouse 取一個時間點，不是固定往回看的時間窗 ——
+   往回看的窗會含到上一個案例的 span，等於讓案例之間有隱性的時間相依）
    用來區分「tracing 被關掉」與「propagation 壞掉、span 落在別條 trace」</pre>
       <h4>② Relay eval API 回應</h4>
       <pre class="code">{
@@ -1228,34 +1234,54 @@ http_count=1
   &quot;value&quot;: false,
   &quot;cacheable&quot;: true
 }</pre>
-      
+      <p class="meta">targeting key 由 backend pod 名稱推導（otel-flags 送的是 &lt;hostname&gt;-&lt;pid&gt;）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。</p>
       <h4>③ Demo API 回應</h4>
       <pre class="code">{
-  &quot;traceId&quot;: &quot;81be78258c3fa1f0409189b04904426d&quot;,
-  &quot;spanId&quot;: &quot;60cfc14aef8c882e&quot;
+  &quot;traceId&quot;: &quot;b50a6c848dd5c1ff57821152bc7c1ac1&quot;,
+  &quot;spanId&quot;: &quot;1fd0ddb9f278829e&quot;
 }</pre>
       <h4>④ ClickHouse 查詢結果</h4>
-      <pre class="code">TraceId=81be78258c3fa1f0409189b04904426d
-   ┌─SpanName─────────────┬─SpanKind─┐
-1. │ POST /api/demo-trace │ Server   │
-   └──────────────────────┴──────────┘
+      <pre class="code">TraceId=b50a6c848dd5c1ff57821152bc7c1ac1
+   ┌─SpanName─────────────┬─SpanKind─┬─ServiceName──┐
+1. │ POST /api/demo-trace │ Server   │ demo-backend │
+   └──────────────────────┴──────────┴──────────────┘
 nats_count=0
-http_count=1</pre>
+http_count=1
+nats_spans_cluster_wide_since_probe=0
+--- recent 15 ---
+    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+ 1. │ b50a6c848dd5 │ POST /api/demo-trace       │ Server   │
+ 2. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │
+ 3. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │
+ 4. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │
+ 5. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │
+ 6. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │
+ 7. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │
+ 8. │ b87b84064cca │ send demo.trace.reply      │ Producer │
+ 9. │ b87b84064cca │ process demo.trace.request │ Consumer │
+10. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │
+11. │ 59dbb7e87b6a │ POST /api/demo-trace       │ Server   │
+12. │ 1a1f60bb65d1 │ POST /api/demo-trace       │ Server   │
+13. │ 3ebf9c892d31 │ process demo.trace.reply   │ Consumer │
+14. │ eef8e076733e │ send demo.trace.reply      │ Producer │
+15. │ eef8e076733e │ process demo.trace.request │ Consumer │
+    └──────────────┴────────────────────────────┴──────────┘
+</pre>
       <h4>⑤ 證據檔案（docs/evidence/）</h4>
       <pre class="code">{
-  &quot;apply&quot;: &quot;live-step-c2-apply.txt&quot;,
-  &quot;relay&quot;: &quot;live-step-c2-relay.json&quot;,
-  &quot;api&quot;: &quot;live-step-c2-api.json&quot;,
-  &quot;clickhouse&quot;: &quot;live-step-c2-clickhouse.txt&quot;
+  &quot;apply&quot;: &quot;live-configmap-apply-c2-disabled.txt&quot;,
+  &quot;relay&quot;: &quot;live-relay-eval-c2-disabled.json&quot;,
+  &quot;api&quot;: &quot;live-step-c2-disabled-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-clickhouse-c2-disabled.txt&quot;
 }</pre>
     </article>
 
     <article class="case" id="live-C3">
       <header>
         <h3><code>C3</code> ConfigMap → enabled：NATS span 恢復 <span class="badge ok">通過</span></h3>
-        <p class="meta">traceId=<code>102b25e8f42be31c0a7639092e06237b</code> · nats=1 · http=1
-        · 全叢集近 2 分鐘 NATS span=n/a
-        · 收斂用了 n/a 次嘗試</p>
+        <p class="meta">traceId=<code>5d515aca85a926d50f3c38ab7d77ed65</code> · nats=1 · http=1
+        · 本次探測後全叢集 NATS span=4
+        · 收斂用了 1 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」），全程不重啟
@@ -1265,7 +1291,9 @@ http_count=1</pre>
 4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，
    直到結果符合預期或用盡重試（attempts 欄位記錄實際用了幾次）
 5. ClickHouse 查詢 otel.otel_traces WHERE TraceId = &lt;traceId&gt;（TabSeparated 取純數字）
-6. 停用案例額外查全叢集最近 2 分鐘的 demo.trace span 數，
+6. 停用案例額外查「本次探測開始之後」全叢集的 demo.trace span 數
+   （每次嘗試各自向 ClickHouse 取一個時間點，不是固定往回看的時間窗 ——
+   往回看的窗會含到上一個案例的 span，等於讓案例之間有隱性的時間相依）
    用來區分「tracing 被關掉」與「propagation 壞掉、span 落在別條 trace」</pre>
       <h4>② Relay eval API 回應</h4>
       <pre class="code">{
@@ -1278,26 +1306,46 @@ http_count=1</pre>
   &quot;value&quot;: true,
   &quot;cacheable&quot;: true
 }</pre>
-      
+      <p class="meta">targeting key 由 backend pod 名稱推導（otel-flags 送的是 &lt;hostname&gt;-&lt;pid&gt;）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。</p>
       <h4>③ Demo API 回應</h4>
       <pre class="code">{
-  &quot;traceId&quot;: &quot;102b25e8f42be31c0a7639092e06237b&quot;,
-  &quot;spanId&quot;: &quot;def0d5760d2e673b&quot;
+  &quot;traceId&quot;: &quot;5d515aca85a926d50f3c38ab7d77ed65&quot;,
+  &quot;spanId&quot;: &quot;8b8cef6f5f37239f&quot;
 }</pre>
       <h4>④ ClickHouse 查詢結果</h4>
-      <pre class="code">TraceId=102b25e8f42be31c0a7639092e06237b
-   ┌─SpanName────────────────┬─SpanKind─┐
-1. │ POST /api/demo-trace    │ Server   │
-2. │ send demo.trace.request │ Producer │
-   └─────────────────────────┴──────────┘
+      <pre class="code">TraceId=5d515aca85a926d50f3c38ab7d77ed65
+   ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐
+1. │ POST /api/demo-trace    │ Server   │ demo-backend │
+2. │ send demo.trace.request │ Producer │ demo-backend │
+   └─────────────────────────┴──────────┴──────────────┘
 nats_count=1
-http_count=1</pre>
+http_count=1
+nats_spans_cluster_wide_since_probe=4
+--- recent 15 ---
+    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+ 1. │ 2eca6a886727 │ process demo.trace.reply   │ Consumer │
+ 2. │ e80f004dcbf0 │ send demo.trace.reply      │ Producer │
+ 3. │ e80f004dcbf0 │ process demo.trace.request │ Consumer │
+ 4. │ 5d515aca85a9 │ send demo.trace.request    │ Producer │
+ 5. │ 5d515aca85a9 │ POST /api/demo-trace       │ Server   │
+ 6. │ b50a6c848dd5 │ POST /api/demo-trace       │ Server   │
+ 7. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │
+ 8. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │
+ 9. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │
+10. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │
+11. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │
+12. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │
+13. │ b87b84064cca │ send demo.trace.reply      │ Producer │
+14. │ b87b84064cca │ process demo.trace.request │ Consumer │
+15. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │
+    └──────────────┴────────────────────────────┴──────────┘
+</pre>
       <h4>⑤ 證據檔案（docs/evidence/）</h4>
       <pre class="code">{
-  &quot;apply&quot;: &quot;live-step-c3-apply.txt&quot;,
-  &quot;relay&quot;: &quot;live-step-c3-relay.json&quot;,
-  &quot;api&quot;: &quot;live-step-c3-api.json&quot;,
-  &quot;clickhouse&quot;: &quot;live-step-c3-clickhouse.txt&quot;
+  &quot;apply&quot;: &quot;live-configmap-apply-c3-enabled.txt&quot;,
+  &quot;relay&quot;: &quot;live-relay-eval-c3-enabled.json&quot;,
+  &quot;api&quot;: &quot;live-step-c3-enabled-api.json&quot;,
+  &quot;clickhouse&quot;: &quot;live-clickhouse-c3-enabled.txt&quot;
 }</pre>
     </article>
 

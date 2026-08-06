@@ -1,23 +1,29 @@
 {
-  "generated_at": "2026-08-05T14:07:49Z",
-  "cluster": "docker-desktop",
+  "generated_at": "2026-08-06T02:36:56Z",
+  "cluster": "kind-demo-trace",
   "namespace": "demo",
   "backend_env": {
+    "PORT": "8080",
+    "NATS_URL": "nats://nats:4222",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://rotel:4318",
+    "OTEL_SERVICE_NAME": "demo-backend",
+    "CORS_ALLOWED_ORIGIN": "*",
     "OTEL_INSTRUMENTATION_GO_TRACING_ENABLED": "1",
     "OTEL_NATS_TRACING_ENABLED": "false",
     "OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT": "http://relay-proxy:1031",
     "OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL": "2s"
   },
-  "note": "ConfigMap volume 刷新約 60–75s；relay pollingInterval=1s；provider poll=2s",
+  "note": "每個 case 都是輪詢到條件成立（或用盡重試）才記錄，不是固定 sleep。C2 額外查「本次探測開始之後」全叢集的 demo.trace span 數（每次嘗試各自取一個 ClickHouse 端時間點），用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。",
   "cases": [
     {
       "id": "C1",
       "title": "option C 預設：env=false + ConfigMap enabled → 有 NATS span",
       "pass": true,
-      "traceId": "b4ba70128760c34ae4bf15322ddaf167",
+      "traceId": "0beefe8b6f4b048d40dc5cb0c6b230d0",
+      "attempts": 1,
       "api": {
-        "traceId": "b4ba70128760c34ae4bf15322ddaf167",
-        "spanId": "86a522769267ed10"
+        "traceId": "0beefe8b6f4b048d40dc5cb0c6b230d0",
+        "spanId": "994dc41755b6b9d5"
       },
       "relay_eval": {
         "trackEvents": true,
@@ -29,24 +35,27 @@
         "value": true,
         "cacheable": true
       },
+      "relay_eval_note": "targeting key 由 backend pod 名稱推導（otel-flags 送的是 <hostname>-<pid>）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。",
       "nats_count": 1,
       "http_count": 1,
-      "clickhouse": "TraceId=b4ba70128760c34ae4bf15322ddaf167\n   ┌─SpanName────────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace    │ Server   │\n2. │ send demo.trace.request │ Producer │\n   └─────────────────────────┴──────────┘\nnats_count=1\nhttp_count=1\n--- recent 15 ---\n    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐\n 1. │ 2daca0a54b6d │ process demo.trace.reply   │ Consumer │\n 2. │ 97ea4e4f4d85 │ send demo.trace.reply      │ Producer │\n 3. │ 97ea4e4f4d85 │ process demo.trace.request │ Consumer │\n 4. │ b4ba70128760 │ send demo.trace.request    │ Producer │\n 5. │ 0b886256e5f5 │ HTTP POST                  │ Client   │\n 6. │ b4ba70128760 │ POST /api/demo-trace       │ Server   │\n 7. │ 681c3b67d56a │ process demo.trace.reply   │ Consumer │\n 8. │ c558faf37dfb │ send demo.trace.reply      │ Producer │\n 9. │ c558faf37dfb │ process demo.trace.request │ Consumer │\n10. │ 4f8675fbbf20 │ send demo.trace.request    │ Producer │\n11. │ c7543b98caa5 │ HTTP POST                  │ Client   │\n12. │ 4f8675fbbf20 │ POST /api/demo-trace       │ Server   │\n13. │ 5d440e79ec06 │ HTTP POST                  │ Client   │\n14. │ 85c3d30e7eb4 │ POST /api/demo-trace       │ Server   │\n15. │ a6e1e6471a05 │ process demo.trace.reply   │ Consumer │\n    └──────────────┴────────────────────────────┴──────────┘",
+      "nats_spans_cluster_wide_since_probe": 4,
+      "clickhouse": "TraceId=0beefe8b6f4b048d40dc5cb0c6b230d0\n   ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐\n1. │ POST /api/demo-trace    │ Server   │ demo-backend │\n2. │ send demo.trace.request │ Producer │ demo-backend │\n   └─────────────────────────┴──────────┴──────────────┘\nnats_count=1\nhttp_count=1\nnats_spans_cluster_wide_since_probe=4\n--- recent 15 ---\n    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐\n 1. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │\n 2. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │\n 3. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │\n 4. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │\n 5. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │\n 6. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │\n 7. │ b87b84064cca │ send demo.trace.reply      │ Producer │\n 8. │ b87b84064cca │ process demo.trace.request │ Consumer │\n 9. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │\n10. │ 59dbb7e87b6a │ POST /api/demo-trace       │ Server   │\n11. │ 1a1f60bb65d1 │ POST /api/demo-trace       │ Server   │\n12. │ 3ebf9c892d31 │ process demo.trace.reply   │ Consumer │\n13. │ eef8e076733e │ send demo.trace.reply      │ Producer │\n14. │ eef8e076733e │ process demo.trace.request │ Consumer │\n15. │ 64917f35628a │ send demo.trace.request    │ Producer │\n    └──────────────┴────────────────────────────┴──────────┘\n",
       "files": {
-        "apply": "live-step-c1-apply.txt",
-        "relay": "live-step-c1-relay.json",
-        "api": "live-step-c1-api.json",
-        "clickhouse": "live-step-c1-clickhouse.txt"
+        "apply": "live-configmap-apply-c1-enabled.txt",
+        "relay": "live-relay-eval-c1-enabled.json",
+        "api": "live-step-c1-enabled-api.json",
+        "clickhouse": "live-clickhouse-c1-enabled.txt"
       }
     },
     {
       "id": "C2",
-      "title": "ConfigMap → disabled：HTTP 成功、NATS span=0",
+      "title": "ConfigMap → disabled：HTTP 成功、NATS span=0（全叢集時間窗亦為 0）",
       "pass": true,
-      "traceId": "81be78258c3fa1f0409189b04904426d",
+      "traceId": "b50a6c848dd5c1ff57821152bc7c1ac1",
+      "attempts": 1,
       "api": {
-        "traceId": "81be78258c3fa1f0409189b04904426d",
-        "spanId": "60cfc14aef8c882e"
+        "traceId": "b50a6c848dd5c1ff57821152bc7c1ac1",
+        "spanId": "1fd0ddb9f278829e"
       },
       "relay_eval": {
         "trackEvents": true,
@@ -58,24 +67,27 @@
         "value": false,
         "cacheable": true
       },
+      "relay_eval_note": "targeting key 由 backend pod 名稱推導（otel-flags 送的是 <hostname>-<pid>）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。",
       "nats_count": 0,
       "http_count": 1,
-      "clickhouse": "TraceId=81be78258c3fa1f0409189b04904426d\n   ┌─SpanName─────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace │ Server   │\n   └──────────────────────┴──────────┘\nnats_count=0\nhttp_count=1",
+      "nats_spans_cluster_wide_since_probe": 0,
+      "clickhouse": "TraceId=b50a6c848dd5c1ff57821152bc7c1ac1\n   ┌─SpanName─────────────┬─SpanKind─┬─ServiceName──┐\n1. │ POST /api/demo-trace │ Server   │ demo-backend │\n   └──────────────────────┴──────────┴──────────────┘\nnats_count=0\nhttp_count=1\nnats_spans_cluster_wide_since_probe=0\n--- recent 15 ---\n    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐\n 1. │ b50a6c848dd5 │ POST /api/demo-trace       │ Server   │\n 2. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │\n 3. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │\n 4. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │\n 5. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │\n 6. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │\n 7. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │\n 8. │ b87b84064cca │ send demo.trace.reply      │ Producer │\n 9. │ b87b84064cca │ process demo.trace.request │ Consumer │\n10. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │\n11. │ 59dbb7e87b6a │ POST /api/demo-trace       │ Server   │\n12. │ 1a1f60bb65d1 │ POST /api/demo-trace       │ Server   │\n13. │ 3ebf9c892d31 │ process demo.trace.reply   │ Consumer │\n14. │ eef8e076733e │ send demo.trace.reply      │ Producer │\n15. │ eef8e076733e │ process demo.trace.request │ Consumer │\n    └──────────────┴────────────────────────────┴──────────┘\n",
       "files": {
-        "apply": "live-step-c2-apply.txt",
-        "relay": "live-step-c2-relay.json",
-        "api": "live-step-c2-api.json",
-        "clickhouse": "live-step-c2-clickhouse.txt"
+        "apply": "live-configmap-apply-c2-disabled.txt",
+        "relay": "live-relay-eval-c2-disabled.json",
+        "api": "live-step-c2-disabled-api.json",
+        "clickhouse": "live-clickhouse-c2-disabled.txt"
       }
     },
     {
       "id": "C3",
       "title": "ConfigMap → enabled：NATS span 恢復",
       "pass": true,
-      "traceId": "102b25e8f42be31c0a7639092e06237b",
+      "traceId": "5d515aca85a926d50f3c38ab7d77ed65",
+      "attempts": 1,
       "api": {
-        "traceId": "102b25e8f42be31c0a7639092e06237b",
-        "spanId": "def0d5760d2e673b"
+        "traceId": "5d515aca85a926d50f3c38ab7d77ed65",
+        "spanId": "8b8cef6f5f37239f"
       },
       "relay_eval": {
         "trackEvents": true,
@@ -87,14 +99,16 @@
         "value": true,
         "cacheable": true
       },
+      "relay_eval_note": "targeting key 由 backend pod 名稱推導（otel-flags 送的是 <hostname>-<pid>）。目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。",
       "nats_count": 1,
       "http_count": 1,
-      "clickhouse": "TraceId=102b25e8f42be31c0a7639092e06237b\n   ┌─SpanName────────────────┬─SpanKind─┐\n1. │ POST /api/demo-trace    │ Server   │\n2. │ send demo.trace.request │ Producer │\n   └─────────────────────────┴──────────┘\nnats_count=1\nhttp_count=1",
+      "nats_spans_cluster_wide_since_probe": 4,
+      "clickhouse": "TraceId=5d515aca85a926d50f3c38ab7d77ed65\n   ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐\n1. │ POST /api/demo-trace    │ Server   │ demo-backend │\n2. │ send demo.trace.request │ Producer │ demo-backend │\n   └─────────────────────────┴──────────┴──────────────┘\nnats_count=1\nhttp_count=1\nnats_spans_cluster_wide_since_probe=4\n--- recent 15 ---\n    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐\n 1. │ 2eca6a886727 │ process demo.trace.reply   │ Consumer │\n 2. │ e80f004dcbf0 │ send demo.trace.reply      │ Producer │\n 3. │ e80f004dcbf0 │ process demo.trace.request │ Consumer │\n 4. │ 5d515aca85a9 │ send demo.trace.request    │ Producer │\n 5. │ 5d515aca85a9 │ POST /api/demo-trace       │ Server   │\n 6. │ b50a6c848dd5 │ POST /api/demo-trace       │ Server   │\n 7. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │\n 8. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │\n 9. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │\n10. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │\n11. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │\n12. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │\n13. │ b87b84064cca │ send demo.trace.reply      │ Producer │\n14. │ b87b84064cca │ process demo.trace.request │ Consumer │\n15. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │\n    └──────────────┴────────────────────────────┴──────────┘\n",
       "files": {
-        "apply": "live-step-c3-apply.txt",
-        "relay": "live-step-c3-relay.json",
-        "api": "live-step-c3-api.json",
-        "clickhouse": "live-step-c3-clickhouse.txt"
+        "apply": "live-configmap-apply-c3-enabled.txt",
+        "relay": "live-relay-eval-c3-enabled.json",
+        "api": "live-step-c3-enabled-api.json",
+        "clickhouse": "live-clickhouse-c3-enabled.txt"
       }
     }
   ],

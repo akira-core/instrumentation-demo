@@ -68,19 +68,45 @@ http_count_for_trace() {
   chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE 'POST%'"
 }
 
-# nats_count_recent counts NATS spans across ALL traces in the last N minutes.
+# ch_now returns ClickHouse's own clock as a Unix timestamp, so a window
+# boundary never depends on this shell agreeing with the database about the
+# time.
+#
+# MILLISECONDS, and an integer. Two traps, both hit while writing this:
+#
+#   - A formatted datetime does not survive chq_num, which strips ALL whitespace
+#     (right for a scalar count) and turns "2026-08-06 02:18:02" into an
+#     unparseable "2026-08-0602:18:02".
+#   - Second precision is not enough. toUnixTimestamp(now()) truncates DOWN to
+#     the second, so a mark taken at 02:19:32.004 becomes 02:19:32.000, which
+#     sorts AFTER a span the probe then produced at 02:19:31.988: the count came
+#     back 0 while the span plainly existed. A silent zero here would let the
+#     disabled case pass without proving anything -- worse than the backward
+#     window it replaced, because it looks stronger.
+ch_now() {
+  chq_num "SELECT toUnixTimestamp64Milli(now64(3))"
+}
+
+# nats_count_since counts NATS spans across ALL traces emitted after a mark.
 #
 # This is what makes C2 an assertion rather than an ambiguity. "Zero NATS spans
 # on this trace ID" is equally consistent with tracing being disabled and with
-# trace propagation being broken so the spans landed under a different trace.
-# Counting them cluster-wide over a window tells the two apart.
-nats_count_recent() {
-  chq_num "SELECT count() FROM otel.otel_traces WHERE SpanName LIKE '%demo.trace%' AND Timestamp > now() - INTERVAL $1 MINUTE"
+# trace propagation being broken so the spans landed under a different trace;
+# counting them cluster-wide separates the two.
+#
+# The mark is taken per attempt, immediately before the probe request, rather
+# than as a fixed window backwards. A backward window still contains the
+# PREVIOUS case's spans, so the disabled case could only pass by waiting that
+# window out — an implicit timing dependency between cases, which is the same
+# defect as the fixed sleep this script exists to remove. Measured this way the
+# disabled case converges on its first attempt.
+nats_count_since() {
+  chq_num "SELECT count() FROM otel.otel_traces WHERE SpanName LIKE '%demo.trace%' AND Timestamp > fromUnixTimestamp64Milli(toInt64($1))"
 }
 
 set_flags_cm() {
-  local variation="$1"
-  local out="$EVID/live-configmap-${variation}.yaml"
+  local variation="$1" id="$2"
+  local out="$EVID/live-configmap-${id}.yaml"
   cat >"$out" <<EOF
 apiVersion: v1
 kind: ConfigMap
@@ -96,37 +122,45 @@ data:
       defaultRule:
         variation: ${variation}
 EOF
-  kubectl apply -f "$out" >"$EVID/live-configmap-apply-${variation}.txt" 2>&1
-  cat "$EVID/live-configmap-apply-${variation}.txt" >&2
+  kubectl apply -f "$out" >"$EVID/live-configmap-apply-${id}.txt" 2>&1
+  cat "$EVID/live-configmap-apply-${id}.txt" >&2
 }
 
-# relay_eval asks the relay proxy what it would answer for the module key.
+# relay_eval asks the relay proxy what IT would answer for the module key.
 #
-# The targeting key is derived from the backend pod name because otel-flags
-# supplies "<hostname>-<pid>" and a container's hostname IS its pod name. It is
-# still only an approximation of what the backend sends, so with a percentage or
-# progressiveRollout rule this answer would NOT stand in for the backend's. The
-# authoritative per-process evidence is the span count below; this call records
-# what the control plane believes.
+# This is a control-plane view and nothing more. otel-flags builds its provider
+# with EvaluationTypeInProcess, so the backend fetches the flag CONFIGURATION
+# over HTTP and then evaluates locally: no per-evaluation request ever reaches
+# the relay, and DataCollectorDisabled stops the evaluation events too. The
+# backend's own targeting key and evaluation context are therefore not
+# observable from outside the process at all — there is no request to inspect
+# and no export to read.
+#
+# So this call cannot stand in for what the backend resolved, and the span
+# counts below are the only per-process evidence. The context sent here mirrors
+# what otel-flags would supply (a "<hostname>-<pid>" style key, and the service
+# name from OTEL_SERVICE_NAME) so that a targeting rule is at least exercised
+# against a realistic shape rather than an empty one.
 relay_eval() {
-  local label="$1" key="$2"
+  local label="$1" key="$2" svc="$3"
   local f="$EVID/live-relay-eval-${label}.json"
   curl -sS -X POST "http://127.0.0.1:${RELAY_PF}/v1/feature/otel-nats-tracing/eval" \
     -H 'Content-Type: application/json' \
-    -d "{\"user\":{\"key\":\"${key}\"}}" >"$f"
+    -d "{\"user\":{\"key\":\"${key}\",\"custom\":{\"serviceName\":\"${svc}\",\"service.name\":\"${svc}\"}}}" >"$f"
   cat "$f"
 }
 
 # wait_for_relay polls until the relay proxy serves the variation just applied,
 # so the backend-side convergence loop does not start against a stale ConfigMap.
 wait_for_relay() {
-  local want="$1" key="$2" deadline
+  local want="$1" key="$2" svc="$3" deadline
   deadline=$(( $(date +%s) + RELAY_TIMEOUT ))
   log "waiting for relay to serve variation=${want} (timeout ${RELAY_TIMEOUT}s)"
   while (( $(date +%s) < deadline )); do
     local got
     got=$(curl -sS -X POST "http://127.0.0.1:${RELAY_PF}/v1/feature/otel-nats-tracing/eval" \
-      -H 'Content-Type: application/json' -d "{\"user\":{\"key\":\"${key}\"}}" 2>/dev/null |
+      -H 'Content-Type: application/json' \
+      -d "{\"user\":{\"key\":\"${key}\",\"custom\":{\"serviceName\":\"${svc}\"}}}" 2>/dev/null |
       python3 -c 'import json,sys; print(json.load(sys.stdin).get("variationType",""))' 2>/dev/null || true)
     if [[ "$got" == "$want" ]]; then
       log "relay now serving variation=${got}"
@@ -154,7 +188,7 @@ query_spans() {
     chq "SELECT SpanName, SpanKind, ServiceName FROM otel.otel_traces WHERE TraceId = '$tid' ORDER BY Timestamp FORMAT PrettyCompactMonoBlock"
     echo "nats_count=$nats"
     echo "http_count=$http"
-    echo "nats_spans_cluster_wide_last_2min=$recent"
+    echo "nats_spans_cluster_wide_since_probe=$recent"
     echo "--- recent 15 ---"
     chq "SELECT substring(TraceId,1,12) AS t, SpanName, SpanKind FROM otel.otel_traces WHERE Timestamp > now() - INTERVAL 10 MINUTE ORDER BY Timestamp DESC LIMIT 15 FORMAT PrettyCompactMonoBlock"
   } >"$f" 2>&1
@@ -169,29 +203,30 @@ query_spans() {
 # costs time rather than a false negative. A case that never converges records
 # its last attempt with pass=false.
 run_case() {
-  local id="$1" title="$2" variation="$3" expect="$4" key="$5"
+  local id="$1" title="$2" variation="$3" expect="$4" key="$5" svc="$6"
   local label
   label="$(echo "$id" | tr '[:upper:]' '[:lower:]')-${variation}"
 
   log "CASE ${id}: ConfigMap → ${variation} (expect nats ${expect})"
-  set_flags_cm "$variation"
-  wait_for_relay "$variation" "$key" || true
-  relay_eval "$label" "$key" >/dev/null
+  set_flags_cm "$variation" "$label"
+  wait_for_relay "$variation" "$key" "$svc" || true
+  relay_eval "$label" "$key" "$svc" >/dev/null
 
-  local attempt tid nats http recent pass=false
+  local attempt tid nats http recent since pass=false
   for (( attempt = 1; attempt <= CONVERGE_ATTEMPTS; attempt++ )); do
+    since="$(ch_now)"
     tid="$(demo_trace "$label")"
     sleep "$SPAN_SETTLE"
     nats="$(nats_count_for_trace "$tid")"
     http="$(http_count_for_trace "$tid")"
-    recent="$(nats_count_recent 2)"
-    log "  attempt ${attempt}/${CONVERGE_ATTEMPTS}: trace=${tid} nats=${nats} http=${http} cluster_recent=${recent}"
+    recent="$(nats_count_since "$since")"
+    log "  attempt ${attempt}/${CONVERGE_ATTEMPTS}: trace=${tid} nats=${nats} http=${http} cluster_since_probe=${recent}"
 
     if [[ "$expect" == "gt0" && "${nats:-0}" -gt 0 && "${http:-0}" -gt 0 ]]; then
       pass=true; break
     fi
     # For the disabled case, "gone" means gone everywhere, not merely absent from
-    # this trace ID — see nats_count_recent.
+    # this trace ID — see nats_count_since.
     if [[ "$expect" == "eq0" && "${nats:-1}" -eq 0 && "${http:-0}" -gt 0 && "${recent:-1}" -eq 0 ]]; then
       pass=true; break
     fi
@@ -237,10 +272,10 @@ case = {
     ),
     "nats_count": int(os.environ["NATS"] or 0),
     "http_count": int(os.environ["HTTP"] or 0),
-    "nats_spans_cluster_wide_last_2min": int(os.environ["RECENT"] or 0),
+    "nats_spans_cluster_wide_since_probe": int(os.environ["RECENT"] or 0),
     "clickhouse": read_text(f"{evid}/live-clickhouse-{label}.txt"),
     "files": {
-        "apply": f"live-configmap-apply-{label.split('-', 1)[1]}.txt",
+        "apply": f"live-configmap-apply-{label}.txt",
         "relay": f"live-relay-eval-{label}.json",
         "api": f"live-step-{label}-api.json",
         "clickhouse": f"live-clickhouse-{label}.txt",
@@ -256,11 +291,21 @@ log "context=$(kubectl config current-context)"
 kubectl -n "$NS" get pods -o wide >"$EVID/live-pods.txt" 2>&1
 cat "$EVID/live-pods.txt" >&2
 
-BACKEND_POD="$(kubectl -n "$NS" get pods -l app=backend -o jsonpath='{.items[0].metadata.name}')"
+# The label is app.kubernetes.io/name, not app: deploy/base/backend.yaml uses the
+# recommended-label spelling for both the Deployment selector and the Service.
+BACKEND_POD="$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=backend \
+  -o jsonpath='{.items[0].metadata.name}')"
+if [[ -z "$BACKEND_POD" ]]; then
+  log "ERROR: no backend pod found in namespace ${NS}"
+  exit 1
+fi
 # otel-flags builds its targeting key as "<hostname>-<pid>", and in a container
 # the hostname is the pod name. PID 1 is the usual single-process container.
 TARGET_KEY="${TARGET_KEY:-${BACKEND_POD}-1}"
-log "backend pod=${BACKEND_POD} derived targeting key=${TARGET_KEY}"
+SERVICE_NAME="$(kubectl -n "$NS" get deploy backend \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="OTEL_SERVICE_NAME")]}{.value}{end}')"
+SERVICE_NAME="${SERVICE_NAME:-demo-backend}"
+log "backend pod=${BACKEND_POD} service=${SERVICE_NAME} control-plane targeting key=${TARGET_KEY}"
 
 # live-baseline-env.txt is read by render-flag-matrix-html.py. It used to be a
 # committed file that no script produced, so the report's "cluster baseline"
@@ -294,9 +339,9 @@ curl -sS "http://127.0.0.1:${BACKEND_PF}/healthz" >"$EVID/live-healthz.json"
 cat "$EVID/live-healthz.json" >&2
 echo >&2
 
-run_case C1 "option C 預設：env=false + ConfigMap enabled → 有 NATS span" enabled  gt0 "$TARGET_KEY"
-run_case C2 "ConfigMap → disabled：HTTP 成功、NATS span=0（全叢集時間窗亦為 0）" disabled eq0 "$TARGET_KEY"
-run_case C3 "ConfigMap → enabled：NATS span 恢復" enabled gt0 "$TARGET_KEY"
+run_case C1 "option C 預設：env=false + ConfigMap enabled → 有 NATS span" enabled  gt0 "$TARGET_KEY" "$SERVICE_NAME"
+run_case C2 "ConfigMap → disabled：HTTP 成功、NATS span=0（全叢集時間窗亦為 0）" disabled eq0 "$TARGET_KEY" "$SERVICE_NAME"
+run_case C3 "ConfigMap → enabled：NATS span 恢復" enabled gt0 "$TARGET_KEY" "$SERVICE_NAME"
 
 # Assemble the summary the report reads. Built in Python from the per-case files
 # rather than echoed as bash string fragments, so the committed artifact and the
@@ -328,7 +373,8 @@ summary = {
     "backend_env": backend_env,
     "note": (
         "每個 case 都是輪詢到條件成立（或用盡重試）才記錄，不是固定 sleep。"
-        "C2 額外查全叢集最近 2 分鐘的 demo.trace span 數，用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。"
+        "C2 額外查「本次探測開始之後」全叢集的 demo.trace span 數（每次嘗試各自取一個 ClickHouse 端時間點），"
+        "用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。"
     ),
     "cases": cases,
     "passed": sum(1 for c in cases if c["pass"]),
@@ -339,5 +385,11 @@ with open(f"{evid}/live-summary.json", "w", encoding="utf-8") as fh:
     json.dump(summary, fh, ensure_ascii=False, indent=2)
 print(json.dumps({k: v for k, v in summary.items() if k != "cases"}, ensure_ascii=False, indent=2))
 PY
+
+# The per-case fragments are an implementation detail of the summary assembly
+# above, and every field in them is embedded in live-summary.json. Leaving them
+# behind would commit the same evidence twice, in two files that could then
+# disagree.
+rm -f "$EVID"/live-case-*.json
 
 log "done — evidence in $EVID"

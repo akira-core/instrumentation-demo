@@ -41,3 +41,6 @@ otel-nats-tracing:
     disabled: false
   defaultRule:
     variation: enabled
+
+=== derived targeting key ===
+backend-68fb5fdcc5-m26zd-1

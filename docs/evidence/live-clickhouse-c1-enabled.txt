@@ -1,8 +1,26 @@
-TraceId={"traceId":"959badea02de6c83e182380833bfa555","spanId":"b3840aafe0dc7537"}
-
-959badea02de6c83e182380833bfa555
---- spans ---
---- nats_count ---
-0
---- http_count ---
-0
+TraceId=0beefe8b6f4b048d40dc5cb0c6b230d0
+   ┌─SpanName────────────────┬─SpanKind─┬─ServiceName──┐
+1. │ POST /api/demo-trace    │ Server   │ demo-backend │
+2. │ send demo.trace.request │ Producer │ demo-backend │
+   └─────────────────────────┴──────────┴──────────────┘
+nats_count=1
+http_count=1
+nats_spans_cluster_wide_since_probe=4
+--- recent 15 ---
+    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+ 1. │ d710cd2c0435 │ process demo.trace.reply   │ Consumer │
+ 2. │ 941e8c6a4e38 │ send demo.trace.reply      │ Producer │
+ 3. │ 941e8c6a4e38 │ process demo.trace.request │ Consumer │
+ 4. │ 0beefe8b6f4b │ send demo.trace.request    │ Producer │
+ 5. │ 0beefe8b6f4b │ POST /api/demo-trace       │ Server   │
+ 6. │ 253268c56ee4 │ process demo.trace.reply   │ Consumer │
+ 7. │ b87b84064cca │ send demo.trace.reply      │ Producer │
+ 8. │ b87b84064cca │ process demo.trace.request │ Consumer │
+ 9. │ 59dbb7e87b6a │ send demo.trace.request    │ Producer │
+10. │ 59dbb7e87b6a │ POST /api/demo-trace       │ Server   │
+11. │ 1a1f60bb65d1 │ POST /api/demo-trace       │ Server   │
+12. │ 3ebf9c892d31 │ process demo.trace.reply   │ Consumer │
+13. │ eef8e076733e │ send demo.trace.reply      │ Producer │
+14. │ eef8e076733e │ process demo.trace.request │ Consumer │
+15. │ 64917f35628a │ send demo.trace.request    │ Producer │
+    └──────────────┴────────────────────────────┴──────────┘

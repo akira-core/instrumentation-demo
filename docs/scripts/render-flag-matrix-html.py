@@ -118,7 +118,7 @@ def main() -> None:
         '<div class="callout warn"><strong>叢集證據早於腳本改版</strong><br/>'
         '下方 live 案例是舊版 <code>capture-live-evidence.sh</code>（固定 sleep 75 秒、'
         '以 grep 解析 ClickHouse 表格輸出、無全叢集時間窗查詢）產生的，'
-        '缺少 <code>attempts</code> 與 <code>nats_spans_cluster_wide_last_2min</code> 欄位。'
+        '缺少 <code>attempts</code> 與 <code>nats_spans_cluster_wide_since_probe</code> 欄位。'
         '「① 設定步驟」描述的是<strong>現在</strong>腳本的做法。'
         '要讓兩者一致，需對 <code>demo</code> namespace 重跑 '
         '<code>./docs/scripts/capture-live-evidence.sh</code>。</div>'
@@ -134,7 +134,9 @@ def main() -> None:
 4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，
    直到結果符合預期或用盡重試（attempts 欄位記錄實際用了幾次）
 5. ClickHouse 查詢 otel.otel_traces WHERE TraceId = <traceId>（TabSeparated 取純數字）
-6. 停用案例額外查全叢集最近 2 分鐘的 demo.trace span 數，
+6. 停用案例額外查「本次探測開始之後」全叢集的 demo.trace span 數
+   （每次嘗試各自向 ClickHouse 取一個時間點，不是固定往回看的時間窗 ——
+   往回看的窗會含到上一個案例的 span，等於讓案例之間有隱性的時間相依）
    用來區分「tracing 被關掉」與「propagation 壞掉、span 落在別條 trace」"""
         live_sections.append(
             f"""
@@ -142,7 +144,7 @@ def main() -> None:
       <header>
         <h3><code>{esc(c['id'])}</code> {esc(c['title'])} {badge(c['pass'])}</h3>
         <p class="meta">traceId=<code>{esc(c.get('traceId'))}</code> · nats={esc(c.get('nats_count'))} · http={esc(c.get('http_count'))}
-        · 全叢集近 2 分鐘 NATS span={esc(c.get('nats_spans_cluster_wide_last_2min', 'n/a'))}
+        · 本次探測後全叢集 NATS span={esc(c.get('nats_spans_cluster_wide_since_probe', 'n/a'))}
         · 收斂用了 {esc(c.get('attempts', 'n/a'))} 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
