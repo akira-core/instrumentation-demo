@@ -38,8 +38,10 @@ spec:
         - name: relay-proxy-config-volume
           configMap:
             name: {{ include "relay-proxy.fullname" . }}
-        {{- with .Values.extraVolumes }}
-        {{- toYaml . | nindent 8 }}
+        {{- if .Values.flags.enabled }}
+        - name: relay-proxy-flags-volume
+          configMap:
+            name: {{ include "relay-proxy.flagsConfigMapName" . }}
         {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -48,6 +50,9 @@ spec:
             - name: {{ $name }}
               {{- $item | toYaml | nindent 14 }}
             {{- end }}
+            {{- with (include "relay-proxy.apiKeyEnv" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}{{ if .Values.image.fips }}-fips{{ end }}"
@@ -55,8 +60,14 @@ spec:
           volumeMounts:
             - name: relay-proxy-config-volume
               mountPath: /goff
-            {{- with .Values.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
+            {{- if .Values.flags.enabled }}
+            {{- /*
+            Directory mount, not subPath: kubelet only refreshes the former, and
+            editing a flag live without restarting the pod is the point.
+            */}}
+            - name: relay-proxy-flags-volume
+              mountPath: {{ .Values.flags.mountPath | quote }}
+              readOnly: true
             {{- end }}
           ports:
             - name: http

@@ -66,6 +66,8 @@ retriever:
 
 The vendored chart is patched with optional `extraVolumes` / `extraVolumeMounts` (values-driven). The volume references `demo-feature-flags` with `optional: true` so `helm-install` before `k8s-apply` still works; `startWithRetrieverError: true` keeps the process up until the file appears. Updates to the ConfigMap propagate through the kubelet mount refresh + GOFF `pollingInterval` (kept short for the demo) — no relay restart, and **no ConfigMap API RBAC**.
 
+- **Superseded**: the `extraVolumes` / `extraVolumeMounts` patch and the `demo-feature-flags` ConfigMap are gone. Flag definitions now ship inside the chart as one file per concern under `charts/relay-proxy/config/`; the chart's `flags.*` values render them into the `relay-proxy-flags` ConfigMap, mount it, and generate one `file` retriever per file. Two consequences follow. The relay proxy has its flags from its first start, so `optional: true` and `startWithRetrieverError: true` are no longer needed — the latter is now `false`, and an unreadable retriever stops the pod instead of leaving it Ready while every evaluation returns the caller's default. And because the mount and the retrievers are templated from the same directory, they cannot drift apart: the earlier arrangement let a values file keep setting `extraVolumes` after the chart stopped rendering it, with nothing failing. The kubelet-refresh + `pollingInterval` propagation path and the absence of ConfigMap API RBAC are unchanged.
+
 `otelnats` resolves `otel-nats-tracing` through OpenFeature under the library ladder `relay > env > option > default`. The relay is authoritative in **both** directions. Demo posture (**option C**):
 
 | Knob | Deployment value | Role |

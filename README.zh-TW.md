@@ -48,7 +48,7 @@ instrumentation、同時業務路徑照常運作，就代表接線方式符合�
 │       └──────────────────► Backend (Go)               Relay proxy (GOFF)    │
 │                                  │  ▲                 ▲                     │
 │                                  │  └─otelnats 輪詢───┘ 掛載的 ConfigMap    │
-│                                  │    （零應用碼）    │ demo-feature-flags  │
+│                                  │    （零應用碼）    │ relay-proxy-flags   │
 │                                  ▼                    │ （file retriever）  │
 │                               NATS                    │                     │
 │                                  │                                          │
@@ -282,13 +282,15 @@ make port-forward PF_FRONTEND_PORT=9081 PF_GRAFANA_PORT=3001
 要關閉：
 
 ```sh
-kubectl edit configmap demo-feature-flags -n demo
+kubectl edit configmap relay-proxy-flags -n demo
 # 將 otel-nats-tracing 的 defaultRule.variation 改為: disabled
 ```
 
-等**約 3 秒** — kubelet 刷新掛載檔、relay 重讀（`pollingInterval: 1000`），接著
-後端的 provider 輪詢 relay（`OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL: 2s`）。
-再點一次 **Start Trace**。
+等**最多約 60 秒**，再點一次 **Start Trace**。要走三段，而第一段是主導項：kubelet
+依自己的同步週期刷新掛載檔（在 kind 上實測 53 秒，偶爾更久），relay 在
+`pollingInterval: 1000` 內重讀，後端 provider 每
+`OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL: 2s` 輪詢一次 relay。只有後兩段可在
+此調整；kubelet 那段本 repo 無法縮短。
 
 | 預期 | 意義 |
 |---|---|
@@ -318,7 +320,7 @@ ingest 與相依服務健康狀態。
 |---|---|
 | 請求成功但沒有 NATS span，且 `otel-nats-tracing` 為 enabled | 未用 `otelnats` 包住 publish/subscribe、relay 尚未可達，或總開關關閉 |
 | 後端連線失敗／重試出現設定錯誤 | 無效的 `OTEL_*_ENABLED` 值（階梯模型下空字串是錯誤），或 NATS 連線問題 |
-| 切換 `otel-nats-tracing` 沒有效果 | `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` 未設定、relay 未掛載 ConfigMap，或編輯後還不到約 3 秒 |
+| 切換 `otel-nats-tracing` 沒有效果 | `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` 未設定，或 kubelet 還沒刷新掛載（給它約 60 秒）。「relay 未掛載 ConfigMap」已不再可能造成這個現象：`flags.enabled` 會把掛載與 retriever 一起產生，而 `startWithRetrieverError: false` 會讓 pod 直接失敗，而不是安靜地回傳預設值 |
 | Frontend 與 backend trace ID 不同 | 缺少 `traceparent`（CORS / fetch instrumentation / 後端 URL 錯誤） |
 | Grafana 完全看不到 span | OTLP 匯出路徑（rotel、port-forward `4318`、ClickHouse） |
 
@@ -326,13 +328,26 @@ ingest 與相依服務健康狀態。
 
 ## 功能開關（參考）
 
-GOFF relay proxy 以 volume **掛載** `demo-feature-flags`，並用 **file** retriever
-讀取 `flags.yaml`（不需要 Kubernetes API RBAC）。可現場編輯 — kubelet 刷新掛載、
-relay 約一秒內重讀，**無需重啟**：
+旗標定義以「一個關注點一個檔案」放在 `charts/relay-proxy/config/`。chart 會把
+這個目錄變成 `relay-proxy-flags` ConfigMap、掛載到 `/flags`，並為每個檔案產生一
+個 **file** retriever（不需要 Kubernetes API RBAC）。因為隨 chart 一起安裝，relay
+proxy 從第一次啟動就有旗標，不必等 `kubectl apply -k deploy/base`。
+
+可現場編輯 ConfigMap — kubelet 刷新掛載、relay 約一秒內重讀，**無需重啟**：
 
 ```sh
-kubectl edit configmap demo-feature-flags -n demo
+kubectl edit configmap relay-proxy-flags -n demo
 ```
+
+現場編輯會維持到下一次 `helm upgrade`，屆時 ConfigMap 會依 `charts/relay-proxy/config/`
+重新產生。要永久改動請改該目錄下的檔案；新增旗標則再丟一個 `.yaml` 進同一個目錄，
+chart 會自動收進去並擴充 retriever 清單。
+
+有一個需要知道的細節：Helm 以 server-side apply 擁有這個 ConfigMap，現場編輯會把
+`.data` 的所有權交給 `kubectl` field manager，下一次 upgrade 就會因欄位所有權衝突而
+中止。`make helm-install`（因此也包含 `make deploy`）為此在 relay-proxy release 上
+加了 `--force-conflicts`，所以 demo 翻旗標不會擋住重新部署。手動跑 `helm upgrade`
+時同樣需要加這個旗標。
 
 由 `otelnats` 自己讀取的環境變數（demo 預設）：
 

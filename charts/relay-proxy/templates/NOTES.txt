@@ -20,3 +20,40 @@
   echo "Visit http://127.0.0.1:8080 to use your application"
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
+{{- if .Values.flags.enabled }}
+
+2. Flag definitions come from {{ .Values.flags.dir }}/ inside the chart, served through the
+   ConfigMap "{{ include "relay-proxy.flagsConfigMapName" . }}" mounted at {{ .Values.flags.mountPath }}:
+
+{{ range $path, $_ := .Files.Glob (include "relay-proxy.flagsGlob" .) }}     {{ $.Values.flags.mountPath }}/{{ base $path }}
+{{ end }}
+   Flip one live, without restarting anything:
+
+     kubectl edit configmap {{ include "relay-proxy.flagsConfigMapName" . }} --namespace {{ .Release.Namespace }}
+
+   Allow roughly a minute: the kubelet refreshes the mount on its own sync
+   period, then the relay proxy re-reads it within its pollingInterval.
+
+   Such an edit lasts until the next upgrade, which needs --force-conflicts to
+   reclaim the field it took over:
+
+     helm upgrade {{ .Release.Name }} <chart> --force-conflicts
+{{- end }}
+{{- if .Values.apiKeyAuth.enabled }}
+
+{{ if .Values.flags.enabled }}3{{ else }}2{{ end }}. API key authentication is ENABLED. Every call to the evaluation endpoints must
+   carry an `Authorization: Bearer <key>` header ({{ if (include "relay-proxy.monitoringPort" .) }}the monitoring port's{{ else }}the{{ end }} /health, /info and
+   /metrics endpoints stay open, so the probes keep working).
+
+   The keys come from the Secret "{{ include "relay-proxy.apiKeySecretName" . }}"{{ if .Values.apiKeyAuth.vaultSecret.create }}, materialised from
+   Vault path "{{ tpl .Values.apiKeyAuth.vaultSecret.path . }}" by the {{ .Values.apiKeyAuth.vaultSecret.kind }} of the same name.
+   Until the Vault operator has produced that Secret the pod will stay in
+   CreateContainerConfigError — check it with:
+
+     kubectl get {{ lower .Values.apiKeyAuth.vaultSecret.kind }},secret {{ include "relay-proxy.apiKeySecretName" . }} --namespace {{ .Release.Namespace }}
+{{- else }}, which this chart does NOT create
+   (apiKeyAuth.vaultSecret.create=false) — make sure it exists in namespace
+   {{ .Release.Namespace }} before the pod starts, or it will stay in
+   CreateContainerConfigError.
+{{- end }}
+{{- end }}

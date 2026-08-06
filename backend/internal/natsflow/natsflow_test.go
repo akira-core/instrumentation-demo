@@ -2,6 +2,7 @@ package natsflow
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestManager_RunRoundTrip_NotConnected(t *testing.T) {
 	m := NewManager("nats://127.0.0.1:0", nil) // never started
 
 	err := m.RunRoundTrip(context.Background(), 100*time.Millisecond)
-	if err != ErrNotConnected {
+	if !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("RunRoundTrip() error = %v, want ErrNotConnected", err)
 	}
 }

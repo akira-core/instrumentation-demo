@@ -27,14 +27,19 @@ PF_ROTEL_PORT    ?= 4318
 # Resolve which kind cluster name to use for kind create/load/delete.
 # Order: explicit CLUSTER_NAME → kind-* current context → sole kind cluster → default.
 # Exports RESOLVED_CLUSTER (empty only if no kind tooling path applies).
+#
+# The case patterns below carry a leading `(`. This macro is used inside `$(...)`
+# and make's default SHELL on macOS is /bin/sh = bash 3.2, whose command
+# substitution parser mistakes the `)` of an unparenthesised case pattern for the
+# closing paren of the substitution ("syntax error near unexpected token `;;'").
 define resolve_kind_cluster
 	if [ -n "$(CLUSTER_NAME)" ]; then \
 		echo "$(CLUSTER_NAME)"; \
 	else \
 		ctx=$$(kubectl config current-context 2>/dev/null || true); \
 		case "$$ctx" in \
-			kind-*) echo "$${ctx#kind-}" ;; \
-			*) \
+			(kind-*) echo "$${ctx#kind-}" ;; \
+			(*) \
 				clusters=$$(kind get clusters 2>/dev/null || true); \
 				n=$$(printf '%s\n' "$$clusters" | sed '/^$$/d' | wc -l | tr -d ' '); \
 				if [ "$$n" -eq 1 ]; then \
@@ -46,7 +51,7 @@ define resolve_kind_cluster
 	fi
 endef
 
-.PHONY: bootstrap kind-up kind-down kube-context build-images kind-load helm-install k8s-apply \
+.PHONY: bootstrap chart-test kind-up kind-down kube-context build-images kind-load helm-install k8s-apply \
 	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs
 
 # Initialize/update git submodules (instrumentation-js, instrumentation-go) to their
@@ -54,6 +59,18 @@ endef
 # `--recurse-submodules`.
 bootstrap:
 	git submodule update --init --remote
+
+# Run the helm-unittest suites of the locally patched charts. No cluster needed.
+# Worth running before `make deploy`: these suites exist to catch a local patch
+# being dropped on a chart re-pull, which otherwise shows up only as a relay
+# proxy that starts healthy and serves no flags.
+chart-test:
+	@helm plugin list 2>/dev/null | grep -q '^unittest' || { \
+		echo "helm-unittest plugin missing. Install it with:"; \
+		echo "  helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false"; \
+		exit 1; \
+	}
+	helm unittest charts/relay-proxy
 
 # Create a local kind cluster only if the resolved name does not already exist.
 # Never deletes or recreates an existing cluster — re-run `make deploy` to upgrade in place.
@@ -115,6 +132,14 @@ kind-load: build-images
 # at the address otelnats is pointed at (OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
 # in deploy/base/backend.yaml).
 #
+# relay-proxy also takes --force-conflicts. Helm owns the relay-proxy-flags
+# ConfigMap through server-side apply, and flipping a flag live (the demo's
+# whole point) hands .data to the kubectl field manager. Server-side apply only
+# raises a conflict when the values disagree, so the very situation the demo
+# creates — a live value differing from charts/relay-proxy/config/ — is exactly
+# what would abort the next deploy. --force-conflicts says what is already true:
+# the chart directory is the source of truth, and a live flip is temporary.
+#
 # ClickHouse is installed in two steps on first apply so CRDs from the operator
 # exist before the CHI/CHK custom resources are created (avoids a race where
 # helm applies CRs before the crd-install Job finishes).
@@ -132,11 +157,13 @@ helm-install: kube-context
 		--set operator.enabled=false \
 		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
-	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
+	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace --force-conflicts
 	helm upgrade --install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n $(NAMESPACE) --create-namespace
 
-# Apply the in-house services (frontend, backend, feature-flags ConfigMap)
-# via the Kustomize base.
+# Apply the in-house services (frontend, backend) via the Kustomize base.
+# Flag definitions are NOT here: they ship inside the relay proxy chart under
+# charts/relay-proxy/config/ and are installed by helm-install above, so the
+# relay proxy has its flags from its very first start.
 k8s-apply: kube-context
 	kubectl apply -k deploy/base
 
@@ -204,6 +231,11 @@ teardown:
 		echo "Hint: make teardown CLUSTER_NAME=<kind-cluster-name>"; \
 		exit 1; \
 	fi
+
+# `kind-down` reads as the counterpart to `kind-up` and has been in .PHONY since
+# the Makefile was written, but never had a recipe — so `make kind-down` printed
+# "Nothing to be done" and deleted nothing, while looking like it had worked.
+kind-down: teardown
 
 # Run a bounded OTLP trace load test against rotel. Not part of `deploy` — load
 # only ever runs when explicitly asked for.

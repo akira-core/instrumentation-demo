@@ -1,0 +1,132 @@
+suite: test monitoring port detection
+templates:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+tests:
+  - it: should expose a nested server.monitoringPort and probe on it
+    set:
+      relayproxy.config: |
+        server:
+          mode: http
+          port: 1031
+          monitoringPort: 1032
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: monitoring
+            containerPort: 1032
+            protocol: TCP
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: monitoring
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: monitoring
+        template: deployment.yaml
+      - contains:
+          path: spec.ports
+          content:
+            port: 1032
+            targetPort: monitoring
+            protocol: TCP
+            name: monitoring
+        template: service.yaml
+
+  - it: should accept the older top-level monitoringPort
+    set:
+      relayproxy.config: |
+        server:
+          mode: http
+          port: 1031
+        monitoringPort: 1032
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: monitoring
+            containerPort: 1032
+            protocol: TCP
+        template: deployment.yaml
+
+  - it: should accept server.monitoringPort written as a literal dotted key
+    set:
+      relayproxy.config: |
+        server.monitoringPort: 1032
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: monitoring
+            containerPort: 1032
+            protocol: TCP
+        template: deployment.yaml
+
+  - it: should prefer server.monitoringPort over the top-level one
+    set:
+      relayproxy.config: |
+        server:
+          monitoringPort: 1032
+        monitoringPort: 9999
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: monitoring
+            containerPort: 1032
+            protocol: TCP
+        template: deployment.yaml
+
+  # Regression lock. The previous implementation pattern-matched the config
+  # text, so a commented-out monitoringPort opened a container port nothing
+  # listens on and moved both probes onto it — the pod never became Ready.
+  - it: should ignore a commented-out monitoringPort
+    set:
+      relayproxy.config: |
+        server:
+          mode: http
+          port: 1031
+          # monitoringPort: 9999
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].ports
+          count: 1
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+        template: deployment.yaml
+      - lengthEqual:
+          path: spec.ports
+          count: 1
+        template: service.yaml
+
+  - it: should probe on the http port when no monitoringPort is configured
+    set:
+      relayproxy.config: |
+        server:
+          mode: http
+          port: 1031
+        logLevel: info
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].ports
+          count: 1
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+        template: deployment.yaml
+
+  - it: should tolerate a config without a server section
+    set:
+      relayproxy.config: |
+        logLevel: info
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].ports
+          count: 1
+        template: deployment.yaml

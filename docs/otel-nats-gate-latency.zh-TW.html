@@ -21,7 +21,7 @@
     nav ul { list-style:none; padding:0; margin:0; }
     nav a { display:block; color:var(--muted); text-decoration:none; font-size:.8rem; padding:.3rem .45rem; border-radius:4px; }
     nav a:hover { background:var(--surface-2); color:var(--text); }
-    main { max-width:980px; padding:2rem 2.25rem 4rem; }
+    main { max-width:1100px; padding:2rem 2.25rem 4rem; }
     h1 { font-size:1.5rem; margin:0 0 .5rem; line-height:1.35; }
     h2 { margin-top:2.25rem; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
     h3 { margin:.25rem 0; font-size:1.05rem; }
@@ -29,9 +29,11 @@
     .lead,.meta { color:var(--muted); }
     .case { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.15rem 1.25rem; margin:1rem 0 1.5rem; }
     pre.code { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.75rem .9rem; overflow:auto; font-family:var(--mono); font-size:.78rem; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
-    table { width:100%; border-collapse:collapse; font-size:.88rem; margin:1rem 0; }
-    th, td { border:1px solid var(--border); padding:.45rem .55rem; text-align:left; }
+    .scroll { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:.85rem; margin:1rem 0; }
+    th, td { border:1px solid var(--border); padding:.45rem .55rem; text-align:left; vertical-align:top; }
     th { background:var(--surface-2); }
+    td.num { text-align:right; font-family:var(--mono); font-size:.8rem; white-space:nowrap; }
     code { font-family:var(--mono); font-size:.85em; color:#9cd1ff; }
     .callout { background:var(--surface-2); border-left:3px solid var(--accent); padding:.75rem 1rem; margin:1rem 0; border-radius:0 8px 8px 0; }
     .warn { border-left-color:var(--warn); }
@@ -39,7 +41,7 @@
     .stat { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:.75rem 1rem; min-width:150px; }
     .stat b { display:block; font-size:1.25rem; }
     .stat span { color:var(--muted); font-size:.8rem; }
-    .bar-row { display:grid; grid-template-columns:180px 1fr 90px; gap:.6rem; align-items:center; margin:.4rem 0; }
+    .bar-row { display:grid; grid-template-columns:200px 1fr 100px; gap:.6rem; align-items:center; margin:.4rem 0; }
     .bar-label { font-size:.78rem; }
     .bar-track { background:var(--code-bg); border:1px solid var(--border); border-radius:4px; height:18px; overflow:hidden; }
     .bar { height:100%; border-radius:3px; }
@@ -52,77 +54,129 @@
 <div class="layout">
   <nav>
     <div class="brand">otel-nats gate latency</div>
-    <div class="sub">feature flag 閘門 · 各量級 · 證據 · zh-TW</div>
+    <div class="sub">feature flag 閘門 · 500,000 次請求 · 證據 · zh-TW</div>
     <h4>總覽</h4>
     <a href="#overview">目的與方法</a>
-    <a href="#summary">比較總表</a>
-    <a href="#chart">N=100,000 長條圖</a>
+    <a href="#chart">序列 Publish 長條圖</a>
+    <a href="#comparisons">關鍵差額</a>
+    <h4>量測面向</h4>
+    <ul><li><a href="#kind-publish">序列 Publish</a></li>
+<li><a href="#kind-parallel">併發 Publish</a></li>
+<li><a href="#kind-roundtrip">完整往返（publish → 消費 → 回覆 → 消費）</a></li></ul>
     <h4>模式</h4>
     <ul><li><a href="#mode-no_flag_no_env"><code>no_flag_no_env</code></a></li>
 <li><a href="#mode-env_on_no_flag"><code>env_on_no_flag</code></a></li>
-<li><a href="#mode-flag_on"><code>flag_on</code></a></li>
-<li><a href="#mode-flag_off"><code>flag_off</code></a></li></ul>
+<li><a href="#mode-flag_on_memprovider"><code>flag_on_memprovider</code></a></li>
+<li><a href="#mode-flag_off_memprovider"><code>flag_off_memprovider</code></a></li>
+<li><a href="#mode-flag_on_relay"><code>flag_on_relay</code></a></li>
+<li><a href="#mode-flag_off_relay"><code>flag_off_relay</code></a></li></ul>
     <h4>重跑</h4>
     <a href="#repro">如何重跑</a>
   </nav>
   <main>
     <h1>otel-nats feature-flag 閘門延遲<br/>效能證據報告</h1>
-    <p class="lead">評估「有開 feature flag（每 call 評估閘門）」相對於「完全不使用 feature flag / env」
-    在大量 Publish 需要送 trace 時，<strong>單次 call 平均 response time</strong> 的差異。
-    量級：N = 100, 1000, 10000, 100000。</p>
+    <p class="lead">問題：在需要送 trace 的高流量下，<strong>每次操作評估一次 feature-flag 閘門</strong>要多少成本？
+    對照組有兩個 — 完全沒有閘門，以及有 tracing 但沒有閘門。
+    量級固定 <strong>500,000 次操作</strong>，每個模式各跑 5 個獨立子行程。</p>
 
     <div class="stats" id="overview">
-      <div class="stat"><b>4</b><span>設定模式</span></div>
-      <div class="stat"><b>4</b><span>請求量級</span></div>
-      <div class="stat"><b>16</b><span>量測結果列</span></div>
-      <div class="stat"><b>2026-08-05T14:33:41Z</b><span>UTC 產生時間</span></div>
+      <div class="stat"><b>500,000</b><span>每次 run 的操作數</span></div>
+      <div class="stat"><b>6</b><span>設定模式</span></div>
+      <div class="stat"><b>72</b><span>獨立子行程</span></div>
+      <div class="stat"><b>2026-08-06T03:39:43Z</b><span>UTC 產生時間</span></div>
     </div>
 
     <div class="callout">
-      <strong>量測方法</strong><br/>
-      每模式：warmup 200 次 Publish 後，對 N∈{100,1e3,1e4,1e5} 逐次計時 conn.Publish(ctx, subject, payload)。payload 固定 ~32B。TracerProvider 使用 AlwaysSample + 記憶體 SpanRecorder（不走網路 OTLP）。比較重點：flag_on（每 call OpenFeature）vs env_on_no_flag（有 span 無 OF）vs no_flag_no_env（零閘門）。<br/><br/>
-      主機：<code>darwin/arm64 · go1.26.5 · 14 CPU</code> · payload 30 bytes · library：otel-nats + otel-flags (workspace submodule)
+      <strong>行程隔離</strong><br/>每個 mode 一個子行程。原因：otel-flags 的 installDone / autoInstalled / explicitBind 是 process 生命週期的 latch，且 OpenFeature SDK 沒有解除 domain 綁定的方法。舊版在同一個行程內依序量四個 mode，後面的 mode 會沿用前面留下的安裝狀態，量到的並非它宣稱的設定。
+    </div>
+
+    <div class="callout">
+      <strong>量測方法</strong><br/>每個 mode × kind × repeat 都是一個獨立子行程（otel-flags 的 provider 安裝在 process 內是不可逆的 latch，同一行程量兩個 mode 會讓第二個繼承第一個的 latch）。每個子行程：啟動 in-process NATS server、安裝 TracerProvider（AlwaysSample + SimpleSpanProcessor + 丟棄用 exporter，不做 OTLP 序列化也不走網路）、套用該 mode 的 env 與 provider 姿勢、Connect、驗證 conn.TracingEnabled() 與預期相符、warmup 5,000 次後 runtime.GC()，再對每次操作以 time.Now/time.Since 逐次計時。publish=serial conn.Publish；parallel=同一 Conn 上 4×GOMAXPROCS 條 goroutine 併發 Publish；roundtrip=publish→subscriber 回覆→第二個 subscriber 以 correlation id 喚醒呼叫端（等同 natsflow 的 demo 往返，扣掉 5ms 模擬工作）。主指標是各 repeat 中位數的中位數；平均值一併保留但不當標題。allocs/op 由計時區間前後的 runtime.ReadMemStats 差值求得。<br/><br/>
+      主機：<code>linux/amd64 · go1.26.5 · 2 CPU · GOMAXPROCS=2 · GOGC=100 (default) · nats-server 2.12.6</code><br/>
+      cgroup：<code>cpu.max=200000 100000</code><br/>
+      payload 30 bytes · warmup 5,000 · library：otel-nats + otel-flags (workspace submodule)<br/>
+      時鐘粒度 <code>34 ns</code> · 計時開銷 <code>38 ns</code>
+      — 零閘門基準與這兩個數字同量級，解讀時請一併看。
     </div>
 
     <div class="callout warn">
-      <strong>解讀重點</strong>
-      <ul>
-        <li><code>no_flag_no_env</code>：零 OpenFeature、不發 span — 下限基準。</li>
-        <li><code>env_on_no_flag</code>：有 span、無 OF — 「需要送 trace」但不走 feature flag 的基準。</li>
-        <li><code>flag_on</code>：每 call 評估 OF 且發 span — 本 demo option C + relay 啟用路徑。</li>
-        <li><code>flag_off</code>：每 call 仍評估 OF，但不發 span — 閘門本身開銷。</li>
-        <li>關鍵比值：<strong>flag_on / env_on_no_flag</strong> = 在同樣要送 trace 時，加上 feature-flag 閘門的倍數成本。</li>
-      </ul>
+      <strong>已知限制</strong>
+      <ul><li>span 端刻意用丟棄用 exporter，所以 traced 模式不含 OTLP 序列化與網路匯出成本 — 對照生產是低估的。</li><li>flag_on_relay / flag_off_relay 連的是行程內的假 relay（httptest），HTTP 與網路延遲不在熱路徑上：GOFF in-process provider 只在啟動與輪詢時取設定，評估本身不連網。所以量到的是評估成本，不是 relay 的網路成本。</li><li>relay 只提供 otel-nats-tracing，不提供 master key，與 demo ConfigMap 一致；master 每次評估都是 FLAG_NOT_FOUND 後回退本地值，這條路徑一樣要走完整個 SDK 評估流程，成本照算。</li><li>no_flag_no_env 的單次成本與計時器本身同量級，clock_granularity_ns 與 timing_overhead_ns 已一併記錄，median_minus_timing_overhead_ns 是扣掉計時開銷後的值。</li><li>parallel 與 roundtrip 的 goroutine 數是 4×GOMAXPROCS，超過核心數，因此併發數字同時包含排程延遲與鎖競爭，兩者未分離。這是刻意的（真實的請求處理池也超訂），但不要把 parallel 的單次延遲當成單執行緒延遲。</li><li>roundtrip 的單次延遲包含在飛行中的排隊時間：回覆是由同一批核心上的 subscriber goroutine 產生的。要看閘門本身請用 publish 的差額，roundtrip 是用來回答「閘門佔一次真實業務往返的多少」。</li><li>每次往返解析四次閘門（request publish、request handler、reply publish、reply handler），以每次兩個 OpenFeature 評估計，一次 demo 請求共 8 次評估。</li><li>roundtrip 請以 ops/s 解讀，不要用單次延遲：在飛行中的請求數固定時，延遲會隨吞吐反向放大（Little&#x27;s law），所以延遲差額看起來遠大於閘門本身的成本。</li><li>「要送 trace 時加閘門的增量」會略高於「純閘門成本」，即使兩者都是同樣的兩次評估。差異來自 GC：已經在高配置速率下的模式，每次操作要分攤的 GC 工作也比較多。allocs/op 的差額在兩種算法下相同，可以據此對照。</li><li>**跨 campaign 的漂移**：run 內的離散很小（run_spread_pct 多在 5% 以下），但整份重跑之間中位數會漂移到 22%。這台是 2 vCPU 的共用 VM，機器狀態在 campaign 之間的變化大於某些效應本身。因此：差額大於漂移的比較（加閘門 vs 零閘門、span 成本、往返吞吐）可以直接引用；差額與漂移同量級的比較 —— 目前只有 memprovider vs relay 這一對 —— 只能讀方向，不能引用微秒數。</li><li>要判斷一個結論穩不穩，看 allocs/op：它不隨主機負載變動，四次獨立 campaign 都到小數點後兩位一致，且與 go test -benchmem 完全吻合（docs/evidence/perf/benchstat.txt）。時間數字則應以中位數與跨 campaign 範圍一起看，不要單看一次。</li></ul>
     </div>
 
-    <h2 id="summary">比較總表（平均 µs / call）</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>N</th>
-          <th>no_flag_no_env<br/><span class="meta">零閘門</span></th>
-          <th>env_on_no_flag<br/><span class="meta">有 span 無 OF</span></th>
-          <th>flag_on<br/><span class="meta">OF+span</span></th>
-          <th>flag_off<br/><span class="meta">OF 無 span</span></th>
-          <th>flag_on − env_on<br/><span class="meta">閘門增量（送 trace）</span></th>
-          <th>flag_on − base<br/><span class="meta">相對零閘門</span></th>
-          <th>flag_off − base<br/><span class="meta">純 OF 評估</span></th>
-        </tr>
-      </thead>
-      <tbody>
-      <tr><td>100</td><td>0.085</td><td>8.22</td><td>8.49</td><td>6.17</td><td>0.271 (1.03×)</td><td>8.41 (100.0×)</td><td>6.09 (72.6×)</td></tr><tr><td>1,000</td><td>0.268</td><td>3.99</td><td>6.63</td><td>3.78</td><td>2.64 (1.66×)</td><td>6.36 (24.7×)</td><td>3.52 (14.1×)</td></tr><tr><td>10,000</td><td>0.188</td><td>3.45</td><td>6.94</td><td>3.63</td><td>3.49 (2.01×)</td><td>6.75 (36.8×)</td><td>3.44 (19.2×)</td></tr><tr><td>100,000</td><td>0.155</td><td>3.40</td><td>7.39</td><td>3.64</td><td>4.00 (2.18×)</td><td>7.24 (47.6×)</td><td>3.49 (23.5×)</td></tr>
-      </tbody>
-    </table>
+    <h2 id="chart">序列 Publish 中位數延遲</h2>
+    <div class="bar-row"><span class="bar-label"><code>no_flag_no_env</code></span><div class="bar-track"><div class="bar" style="width:2.0%;background:#3ecf8e"></div></div><span class="bar-val">0.252 µs</span></div><div class="bar-row"><span class="bar-label"><code>env_on_no_flag</code></span><div class="bar-track"><div class="bar" style="width:32.5%;background:#3d9cf0"></div></div><span class="bar-val">6.38 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_off_relay</code></span><div class="bar-track"><div class="bar" style="width:58.6%;background:#9aa8bc"></div></div><span class="bar-val">11.53 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_off_memprovider</code></span><div class="bar-track"><div class="bar" style="width:35.1%;background:#6b7a90"></div></div><span class="bar-val">6.90 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_on_relay</code></span><div class="bar-track"><div class="bar" style="width:100.0%;background:#e6a23c"></div></div><span class="bar-val">19.67 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_on_memprovider</code></span><div class="bar-track"><div class="bar" style="width:84.5%;background:#c97f2e"></div></div><span class="bar-val">16.62 µs</span></div>
 
-    <h2 id="chart">N = 100,000 平均延遲比較</h2>
-    <div class="bar-row"><span class="bar-label"><code>no_flag_no_env</code></span><div class="bar-track"><div class="bar" style="width:2.1%;background:#3ecf8e"></div></div><span class="bar-val">0.155 µs</span></div><div class="bar-row"><span class="bar-label"><code>env_on_no_flag</code></span><div class="bar-track"><div class="bar" style="width:46.0%;background:#3d9cf0"></div></div><span class="bar-val">3.40 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_off</code></span><div class="bar-track"><div class="bar" style="width:49.3%;background:#9aa8bc"></div></div><span class="bar-val">3.64 µs</span></div><div class="bar-row"><span class="bar-label"><code>flag_on</code></span><div class="bar-track"><div class="bar" style="width:100.0%;background:#e6a23c"></div></div><span class="bar-val">7.39 µs</span></div>
+    <h2 id="comparisons">關鍵差額</h2>
+    <p class="meta">倍數只在分母有意義時才有意義。零閘門基準是次微秒等級，對它取比值會得到很大但沒有決策價值的數字，
+    所以下表以<strong>差額</strong>為主、倍數為輔。</p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>面向</th><th>比較</th><th>左</th><th>右</th><th>差額</th><th>倍數</th><th>說明</th></tr></thead>
+      <tbody><tr><td><code>publish</code></td><td>純閘門成本（部署姿勢）</td><td><code>flag_off_relay</code><br/>11.53 µs</td><td><code>no_flag_no_env</code><br/>0.252 µs</td><td class='num'><strong>11.28 µs</strong></td><td class='num'>45.77×</td><td class='meta'>relay 自動安裝、flag 關閉、不發 span：差額就是每次 Publish 兩次 OpenFeature 評估的成本。</td></tr><tr><td><code>publish</code></td><td>純閘門成本（測試姿勢）</td><td><code>flag_off_memprovider</code><br/>6.90 µs</td><td><code>no_flag_no_env</code><br/>0.252 µs</td><td class='num'><strong>6.65 µs</strong></td><td class='num'>27.38×</td><td class='meta'>同上，但 provider 由測試直接綁：多付 providerBound 慢路徑與每次評估一個 timeout context。</td></tr><tr><td><code>publish</code></td><td>測試姿勢 vs 部署姿勢</td><td><code>flag_off_memprovider</code><br/>6.90 µs</td><td><code>flag_off_relay</code><br/>11.53 µs</td><td class='num'><strong>-4.63 µs</strong></td><td class='num'>0.60×</td><td class='meta'>舊版報告量的是左邊，demo 部署跑的是右邊。**時間差請只讀方向、不要引用數值** — 跨 campaign 重跑時這一對的差額在 +0.3µs 到 +4.8µs 之間漂移，漂移幅度與效應本身同量級（見 caveats）。可以引用的是 allocs/op：每次 Publish 固定多 10 次配置（每次評估多 5 次），四次獨立 campaign 皆為 +10.01，配置次數不受主機負載影響。原因是測試姿勢省下的（3 次 registry 讀取 + 每次評估一個 timeout context）少於 GOFF in-process rule 評估多付的（context 轉換與 variation 查找）。</td></tr><tr><td><code>publish</code></td><td>span 成本（無閘門）</td><td><code>env_on_no_flag</code><br/>6.38 µs</td><td><code>no_flag_no_env</code><br/>0.252 µs</td><td class='num'><strong>6.13 µs</strong></td><td class='num'>25.33×</td><td class='meta'>只開 env、不走 OpenFeature：差額是建立 span、組 attribute 與注入 W3C header 的成本。</td></tr><tr><td><code>publish</code></td><td>要送 trace 時加閘門的增量</td><td><code>flag_on_relay</code><br/>19.67 µs</td><td><code>env_on_no_flag</code><br/>6.38 µs</td><td class='num'><strong>13.29 µs</strong></td><td class='num'>3.08×</td><td class='meta'>兩邊都發 span，差別只有每次操作的兩次 OpenFeature 評估。這是決策時該看的數字。</td></tr><tr><td><code>publish</code></td><td>部署姿勢 vs 零閘門</td><td><code>flag_on_relay</code><br/>19.67 µs</td><td><code>no_flag_no_env</code><br/>0.252 µs</td><td class='num'><strong>19.42 µs</strong></td><td class='num'>78.06×</td><td class='meta'>完整成本對照下限基準。分母極小，倍數僅供參考，應以差額為準。</td></tr><tr><td><code>parallel</code></td><td>併發下的純閘門成本</td><td><code>flag_off_relay</code><br/>12.49 µs</td><td><code>no_flag_no_env</code><br/>0.277 µs</td><td class='num'><strong>12.21 µs</strong></td><td class='num'>45.09×</td><td class='meta'>4×GOMAXPROCS 條 goroutine 共用一個 Conn：檢查閘門成本在競爭下是否還是常數。</td></tr><tr><td><code>parallel</code></td><td>併發下加閘門的增量</td><td><code>flag_on_relay</code><br/>21.41 µs</td><td><code>env_on_no_flag</code><br/>6.66 µs</td><td class='num'><strong>14.75 µs</strong></td><td class='num'>3.21×</td><td class='meta'>併發版的關鍵比值，與 publish 版對照即可看出鎖競爭放大了多少。</td></tr><tr><td><code>roundtrip</code></td><td>往返：加閘門的增量</td><td><code>flag_on_relay</code><br/>864.4 µs</td><td><code>env_on_no_flag</code><br/>529.8 µs</td><td class='num'><strong>334.6 µs</strong></td><td class='num'>1.63×</td><td class='meta'>一次往返解析四次閘門（共 8 次 OpenFeature 評估），但總時間由 NATS 傳遞主導。</td></tr><tr><td><code>roundtrip</code></td><td>往返：閘門佔比對照</td><td><code>flag_on_relay</code><br/>864.4 µs</td><td><code>no_flag_no_env</code><br/>266.4 µs</td><td class='num'><strong>598.0 µs</strong></td><td class='num'>3.24×</td><td class='meta'>把閘門成本放回真實請求的時間軸上看，才知道它佔一次業務往返的多少。</td></tr></tbody>
+    </table>
+    </div>
+
+    <h2 id="kinds">各面向量測結果</h2>
+    
+    <article class="case" id="kind-publish">
+      <header>
+        <h3>序列 Publish <code>publish</code></h3>
+        <p class="meta">單一 goroutine 逐次 conn.Publish。閘門成本要看這裡的差額。</p>
+        <p class="meta">每 run 5 次獨立子行程 · goroutine 數 1</p>
+      </header>
+      <table>
+        <thead><tr>
+          <th>mode</th><th>中位數 µs<br/><span class="meta">主指標</span></th>
+          <th>截尾均值 µs</th><th>平均 µs</th><th>p95 µs</th><th>p99 µs</th>
+          <th>run 間離散</th><th>allocs/op</th><th>ops/s</th>
+          <th>有 span</th><th>評估次數</th><th>錯誤</th>
+        </tr></thead>
+        <tbody><tr><td><code>no_flag_no_env</code></td><td class='num'><strong>0.252</strong></td><td class='num'>0.236</td><td class='num'>0.530</td><td class='num'>0.299</td><td class='num'>0.401</td><td class='num'>17.5%</td><td class='num'>0.80</td><td class='num'>1,423,517</td><td>否</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>env_on_no_flag</code></td><td class='num'><strong>6.38</strong></td><td class='num'>7.34</td><td class='num'>14.30</td><td class='num'>20.77</td><td class='num'>96.98</td><td class='num'>7.8%</td><td class='num'>27.01</td><td class='num'>69,184</td><td>是</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>flag_on_memprovider</code></td><td class='num'><strong>16.62</strong></td><td class='num'>17.24</td><td class='num'>22.18</td><td class='num'>40.60</td><td class='num'>121.4</td><td class='num'>1.8%</td><td class='num'>62.04</td><td class='num'>44,822</td><td>是</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_off_memprovider</code></td><td class='num'><strong>6.90</strong></td><td class='num'>7.99</td><td class='num'>10.33</td><td class='num'>19.00</td><td class='num'>57.88</td><td class='num'>40.4%</td><td class='num'>36.02</td><td class='num'>95,645</td><td>否</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_on_relay</code></td><td class='num'><strong>19.67</strong></td><td class='num'>20.92</td><td class='num'>26.62</td><td class='num'>47.90</td><td class='num'>141.9</td><td class='num'>2.9%</td><td class='num'>72.05</td><td class='num'>37,385</td><td>是</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_off_relay</code></td><td class='num'><strong>11.53</strong></td><td class='num'>11.73</td><td class='num'>15.29</td><td class='num'>27.44</td><td class='num'>86.15</td><td class='num'>2.6%</td><td class='num'>46.03</td><td class='num'>64,867</td><td>否</td><td class='num'>2</td><td class='num'>0</td></tr></tbody>
+      </table>
+    </article>
+    <article class="case" id="kind-parallel">
+      <header>
+        <h3>併發 Publish <code>parallel</code></h3>
+        <p class="meta">同一個 Conn 上 4×GOMAXPROCS 條 goroutine 併發 Publish。單次延遲含排隊，重點是與序列版的差距 — 那就是鎖競爭放大的部分。</p>
+        <p class="meta">每 run 5 次獨立子行程 · goroutine 數 8</p>
+      </header>
+      <table>
+        <thead><tr>
+          <th>mode</th><th>中位數 µs<br/><span class="meta">主指標</span></th>
+          <th>截尾均值 µs</th><th>平均 µs</th><th>p95 µs</th><th>p99 µs</th>
+          <th>run 間離散</th><th>allocs/op</th><th>ops/s</th>
+          <th>有 span</th><th>評估次數</th><th>錯誤</th>
+        </tr></thead>
+        <tbody><tr><td><code>no_flag_no_env</code></td><td class='num'><strong>0.277</strong></td><td class='num'>0.267</td><td class='num'>2.26</td><td class='num'>0.306</td><td class='num'>0.400</td><td class='num'>9.7%</td><td class='num'>0.76</td><td class='num'>1,923,829</td><td>否</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>env_on_no_flag</code></td><td class='num'><strong>6.66</strong></td><td class='num'>7.81</td><td class='num'>65.47</td><td class='num'>17.44</td><td class='num'>167.1</td><td class='num'>2.1%</td><td class='num'>27.00</td><td class='num'>118,363</td><td>是</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>flag_on_memprovider</code></td><td class='num'><strong>18.76</strong></td><td class='num'>21.25</td><td class='num'>132.7</td><td class='num'>42.66</td><td class='num'>445.1</td><td class='num'>0.7%</td><td class='num'>62.01</td><td class='num'>58,084</td><td>是</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_off_memprovider</code></td><td class='num'><strong>9.81</strong></td><td class='num'>10.61</td><td class='num'>61.27</td><td class='num'>19.41</td><td class='num'>71.31</td><td class='num'>1.3%</td><td class='num'>36.00</td><td class='num'>124,311</td><td>否</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_on_relay</code></td><td class='num'><strong>21.41</strong></td><td class='num'>24.55</td><td class='num'>152.6</td><td class='num'>50.34</td><td class='num'>579.8</td><td class='num'>0.7%</td><td class='num'>72.01</td><td class='num'>51,081</td><td>是</td><td class='num'>2</td><td class='num'>0</td></tr><tr><td><code>flag_off_relay</code></td><td class='num'><strong>12.49</strong></td><td class='num'>13.88</td><td class='num'>80.29</td><td class='num'>26.65</td><td class='num'>155.5</td><td class='num'>1.1%</td><td class='num'>46.00</td><td class='num'>94,905</td><td>否</td><td class='num'>2</td><td class='num'>0</td></tr></tbody>
+      </table>
+    </article>
+    <article class="case" id="kind-roundtrip">
+      <header>
+        <h3>完整往返（publish → 消費 → 回覆 → 消費） <code>roundtrip</code></h3>
+        <p class="meta">等同 natsflow 的 demo 往返（扣掉 5ms 模擬工作）。一次往返解析四次閘門、共 8 次 OpenFeature 評估，但總時間由 NATS 傳遞與排隊主導 — 這張表回答的是「閘門佔一次真實業務往返的多少」。</p>
+        <p class="meta">每 run 3 次獨立子行程 · goroutine 數 8</p>
+      </header>
+      <table>
+        <thead><tr>
+          <th>mode</th><th>中位數 µs<br/><span class="meta">主指標</span></th>
+          <th>截尾均值 µs</th><th>平均 µs</th><th>p95 µs</th><th>p99 µs</th>
+          <th>run 間離散</th><th>allocs/op</th><th>ops/s</th>
+          <th>有 span</th><th>評估次數</th><th>錯誤</th>
+        </tr></thead>
+        <tbody><tr><td><code>no_flag_no_env</code></td><td class='num'><strong>266.4</strong></td><td class='num'>271.9</td><td class='num'>306.6</td><td class='num'>530.2</td><td class='num'>1,178.2</td><td class='num'>3.7%</td><td class='num'>44.22</td><td class='num'>25,983</td><td>否</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>env_on_no_flag</code></td><td class='num'><strong>529.8</strong></td><td class='num'>558.0</td><td class='num'>631.9</td><td class='num'>1,293.5</td><td class='num'>2,453.6</td><td class='num'>0.3%</td><td class='num'>142.60</td><td class='num'>12,567</td><td>是</td><td class='num'>0</td><td class='num'>0</td></tr><tr><td><code>flag_on_relay</code></td><td class='num'><strong>864.4</strong></td><td class='num'>972.4</td><td class='num'>1,100.9</td><td class='num'>2,453.8</td><td class='num'>4,677.5</td><td class='num'>1.1%</td><td class='num'>322.85</td><td class='num'>7,227</td><td>是</td><td class='num'>8</td><td class='num'>0</td></tr><tr><td><code>flag_off_relay</code></td><td class='num'><strong>587.1</strong></td><td class='num'>638.6</td><td class='num'>715.1</td><td class='num'>1,499.7</td><td class='num'>2,577.2</td><td class='num'>1.5%</td><td class='num'>224.52</td><td class='num'>11,132</td><td>否</td><td class='num'>8</td><td class='num'>0</td></tr></tbody>
+      </table>
+    </article>
 
     <h2 id="modes">各模式逐步設定與證據</h2>
     
     <article class="case" id="mode-no_flag_no_env">
       <header>
         <h3><code>no_flag_no_env</code> 完全不使用 feature flag / env（零閘門）</h3>
-        <p class="meta">不綁 named provider、不設 OTEL_* 旗標變數。RelayPossible=false，模組預設 off，熱路徑不做 OpenFeature 評估，也不發 span。</p>
+        <p class="meta">不綁 named provider、不設 OTEL_* 旗標變數。RelayPossible=false，模組預設 off，熱路徑不做 OpenFeature 評估，也不發 span。這是下限基準，不是任何部署姿勢。</p>
+        <p class="meta">provider 姿勢：<code>none</code> ·
+        RelayPossible：否 ·
+        每次 Publish 的 OpenFeature 評估次數：0</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
@@ -130,351 +184,562 @@
 3. UNSET OTEL_NATS_TRACING_ENABLED
 4. FlagDomain → NoopProvider
 5. Connect 不加 WithTracingEnabled</pre>
-      <h4>② 各量級平均延遲（µs / call）</h4>
+      <h4>② 各量測結果（µs / op）</h4>
       <table>
-        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
-        <tbody><tr><td>100</td><td>0.085</td><td>0.083</td><td>0.084</td><td>663,535</td><td>否</td><td>0</td></tr><tr><td>1,000</td><td>0.268</td><td>0.083</td><td>0.166</td><td>2,117,895</td><td>否</td><td>0</td></tr><tr><td>10,000</td><td>0.188</td><td>0.083</td><td>0.125</td><td>3,747,132</td><td>否</td><td>0</td></tr><tr><td>100,000</td><td>0.155</td><td>0.083</td><td>0.125</td><td>4,716,295</td><td>否</td><td>0</td></tr></tbody>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>0.252</td><td class='num'>0.213 – 0.257</td><td class='num'>0.401</td><td class='num'>0.80</td><td class='num'>13</td><td class='num'>0.214</td></tr><tr><td><code>parallel</code></td><td class='num'>0.277</td><td class='num'>0.256 – 0.283</td><td class='num'>0.400</td><td class='num'>0.76</td><td class='num'>12</td><td class='num'>0.244</td></tr><tr><td><code>roundtrip</code></td><td class='num'>266.4</td><td class='num'>263.4 – 273.3</td><td class='num'>1,178.2</td><td class='num'>44.22</td><td class='num'>3,760</td><td class='num'>266.4</td></tr></tbody>
       </table>
-      <h4>③ 原始結果 JSON 片段</h4>
+      <h4>③ 原始聚合 JSON</h4>
       <pre class="code">[
   {
     &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
-    &quot;n&quot;: 100,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 84.98,
-    &quot;avg_us&quot;: 0.08498,
-    &quot;p50_ns&quot;: 83,
-    &quot;p95_ns&quot;: 84,
-    &quot;p99_ns&quot;: 166,
-    &quot;min_ns&quot;: 41,
-    &quot;max_ns&quot;: 583,
-    &quot;total_ms&quot;: 0.15,
-    &quot;ops_per_sec&quot;: 663534.7824932983,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 252,
+    &quot;median_us&quot;: 0.252,
+    &quot;trimmed_avg_ns&quot;: 235.7791288888889,
+    &quot;avg_ns&quot;: 529.880646,
+    &quot;p95_ns&quot;: 299,
+    &quot;p99_ns&quot;: 401,
+    &quot;min_run_median_ns&quot;: 213,
+    &quot;max_run_median_ns&quot;: 257,
+    &quot;run_spread_pct&quot;: 17.46031746031746,
+    &quot;ops_per_sec&quot;: 1423517.441389794,
+    &quot;mallocs_per_op&quot;: 0.798084,
+    &quot;bytes_per_op&quot;: 12.831968,
     &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 37.53887777777778,
+    &quot;median_minus_timing_overhead_ns&quot;: 214.46112222222223
   },
   {
     &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
-    &quot;n&quot;: 1000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 267.926,
-    &quot;avg_us&quot;: 0.267926,
-    &quot;p50_ns&quot;: 83,
-    &quot;p95_ns&quot;: 166,
-    &quot;p99_ns&quot;: 583,
-    &quot;min_ns&quot;: 41,
-    &quot;max_ns&quot;: 54750,
-    &quot;total_ms&quot;: 0.472,
-    &quot;ops_per_sec&quot;: 2117894.727924654,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 277,
+    &quot;median_us&quot;: 0.277,
+    &quot;trimmed_avg_ns&quot;: 267.36569777777777,
+    &quot;avg_ns&quot;: 2262.083678,
+    &quot;p95_ns&quot;: 306,
+    &quot;p99_ns&quot;: 400,
+    &quot;min_run_median_ns&quot;: 256,
+    &quot;max_run_median_ns&quot;: 283,
+    &quot;run_spread_pct&quot;: 9.747292418772563,
+    &quot;ops_per_sec&quot;: 1923829.1550752432,
+    &quot;mallocs_per_op&quot;: 0.758914,
+    &quot;bytes_per_op&quot;: 12.1648,
     &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.23835555555556,
+    &quot;median_minus_timing_overhead_ns&quot;: 243.76164444444444
   },
   {
     &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
-    &quot;n&quot;: 10000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 188.4039,
-    &quot;avg_us&quot;: 0.18840389999999999,
-    &quot;p50_ns&quot;: 83,
-    &quot;p95_ns&quot;: 125,
-    &quot;p99_ns&quot;: 333,
-    &quot;min_ns&quot;: 41,
-    &quot;max_ns&quot;: 52167,
-    &quot;total_ms&quot;: 2.668,
-    &quot;ops_per_sec&quot;: 3747131.570782566,
+    &quot;kind&quot;: &quot;roundtrip&quot;,
+    &quot;repeats&quot;: 3,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 266427,
+    &quot;median_us&quot;: 266.427,
+    &quot;trimmed_avg_ns&quot;: 271909.6371333333,
+    &quot;avg_ns&quot;: 306562.785164,
+    &quot;p95_ns&quot;: 530249,
+    &quot;p99_ns&quot;: 1178197,
+    &quot;min_run_median_ns&quot;: 263361,
+    &quot;max_run_median_ns&quot;: 273319,
+    &quot;run_spread_pct&quot;: 3.737609176247152,
+    &quot;ops_per_sec&quot;: 25982.64226091692,
+    &quot;mallocs_per_op&quot;: 44.2215,
+    &quot;bytes_per_op&quot;: 3760.405632,
     &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;no_flag_no_env&quot;,
-    &quot;n&quot;: 100000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 155.20068,
-    &quot;avg_us&quot;: 0.15520068,
-    &quot;p50_ns&quot;: 83,
-    &quot;p95_ns&quot;: 125,
-    &quot;p99_ns&quot;: 250,
-    &quot;min_ns&quot;: 0,
-    &quot;max_ns&quot;: 149375,
-    &quot;total_ms&quot;: 21.203,
-    &quot;ops_per_sec&quot;: 4716295.267060927,
-    &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.244822222222226,
+    &quot;median_minus_timing_overhead_ns&quot;: 266393.7551777778
   }
 ]</pre>
     </article>
-
     <article class="case" id="mode-env_on_no_flag">
       <header>
         <h3><code>env_on_no_flag</code> 僅 env 開啟 tracing（無 feature flag / 無 OpenFeature）</h3>
-        <p class="meta">OTEL_NATS_TRACING_ENABLED=true，無 named provider。會發 span，但熱路徑不做 OpenFeature 評估（本地 master∧module 布林）。</p>
+        <p class="meta">OTEL_NATS_TRACING_ENABLED=true，無 named provider、無 endpoint。會發 span，但熱路徑不做 OpenFeature 評估（本地 master∧module 布林）。「要送 trace 但不要 feature flag」的基準。</p>
+        <p class="meta">provider 姿勢：<code>none</code> ·
+        RelayPossible：否 ·
+        每次 Publish 的 OpenFeature 評估次數：0</p>
       </header>
       <h4>① 設定步驟</h4>
       <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
 2. UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED（master 預設 true）
 3. SET OTEL_NATS_TRACING_ENABLED=true
 4. FlagDomain → NoopProvider</pre>
-      <h4>② 各量級平均延遲（µs / call）</h4>
+      <h4>② 各量測結果（µs / op）</h4>
       <table>
-        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
-        <tbody><tr><td>100</td><td>8.22</td><td>2.25</td><td>20.04</td><td>108,372</td><td>是</td><td>0</td></tr><tr><td>1,000</td><td>3.99</td><td>2.00</td><td>13.67</td><td>241,899</td><td>是</td><td>0</td></tr><tr><td>10,000</td><td>3.45</td><td>1.75</td><td>9.54</td><td>286,127</td><td>是</td><td>0</td></tr><tr><td>100,000</td><td>3.40</td><td>1.71</td><td>8.75</td><td>290,509</td><td>是</td><td>0</td></tr></tbody>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>6.38</td><td class='num'>6.33 – 6.83</td><td class='num'>96.98</td><td class='num'>27.01</td><td class='num'>4,170</td><td class='num'>6.35</td></tr><tr><td><code>parallel</code></td><td class='num'>6.66</td><td class='num'>6.59 – 6.73</td><td class='num'>167.1</td><td class='num'>27.00</td><td class='num'>4,078</td><td class='num'>6.63</td></tr><tr><td><code>roundtrip</code></td><td class='num'>529.8</td><td class='num'>528.6 – 530.4</td><td class='num'>2,453.6</td><td class='num'>142.60</td><td class='num'>18,107</td><td class='num'>529.8</td></tr></tbody>
       </table>
-      <h4>③ 原始結果 JSON 片段</h4>
+      <h4>③ 原始聚合 JSON</h4>
       <pre class="code">[
   {
     &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
-    &quot;n&quot;: 100,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 8224.16,
-    &quot;avg_us&quot;: 8.22416,
-    &quot;p50_ns&quot;: 2250,
-    &quot;p95_ns&quot;: 20042,
-    &quot;p99_ns&quot;: 143125,
-    &quot;min_ns&quot;: 1291,
-    &quot;max_ns&quot;: 148000,
-    &quot;total_ms&quot;: 0.922,
-    &quot;ops_per_sec&quot;: 108371.7149823896,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 6384,
+    &quot;median_us&quot;: 6.384,
+    &quot;trimmed_avg_ns&quot;: 7340.337873333333,
+    &quot;avg_ns&quot;: 14298.152728,
+    &quot;p95_ns&quot;: 20774,
+    &quot;p99_ns&quot;: 96980,
+    &quot;min_run_median_ns&quot;: 6333,
+    &quot;max_run_median_ns&quot;: 6834,
+    &quot;run_spread_pct&quot;: 7.847744360902255,
+    &quot;ops_per_sec&quot;: 69184.12710702654,
+    &quot;mallocs_per_op&quot;: 27.006828,
+    &quot;bytes_per_op&quot;: 4170.164224,
     &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 37.3845,
+    &quot;median_minus_timing_overhead_ns&quot;: 6346.6155
   },
   {
     &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
-    &quot;n&quot;: 1000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3988.619,
-    &quot;avg_us&quot;: 3.9886190000000004,
-    &quot;p50_ns&quot;: 2000,
-    &quot;p95_ns&quot;: 13667,
-    &quot;p99_ns&quot;: 20542,
-    &quot;min_ns&quot;: 1250,
-    &quot;max_ns&quot;: 212583,
-    &quot;total_ms&quot;: 4.133,
-    &quot;ops_per_sec&quot;: 241898.8674053129,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 6662,
+    &quot;median_us&quot;: 6.662,
+    &quot;trimmed_avg_ns&quot;: 7814.150951111111,
+    &quot;avg_ns&quot;: 65473.127158,
+    &quot;p95_ns&quot;: 17440,
+    &quot;p99_ns&quot;: 167081,
+    &quot;min_run_median_ns&quot;: 6588,
+    &quot;max_run_median_ns&quot;: 6729,
+    &quot;run_spread_pct&quot;: 2.1164815370759533,
+    &quot;ops_per_sec&quot;: 118363.42174006434,
+    &quot;mallocs_per_op&quot;: 27.000384,
+    &quot;bytes_per_op&quot;: 4077.591616,
     &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.13856111111111,
+    &quot;median_minus_timing_overhead_ns&quot;: 6628.861438888889
   },
   {
     &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
-    &quot;n&quot;: 10000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3445.8795,
-    &quot;avg_us&quot;: 3.4458795,
-    &quot;p50_ns&quot;: 1750,
-    &quot;p95_ns&quot;: 9541,
-    &quot;p99_ns&quot;: 21083,
-    &quot;min_ns&quot;: 1000,
-    &quot;max_ns&quot;: 149500,
-    &quot;total_ms&quot;: 34.949,
-    &quot;ops_per_sec&quot;: 286127.1262822072,
+    &quot;kind&quot;: &quot;roundtrip&quot;,
+    &quot;repeats&quot;: 3,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 529848,
+    &quot;median_us&quot;: 529.848,
+    &quot;trimmed_avg_ns&quot;: 557955.4305266667,
+    &quot;avg_ns&quot;: 631922.706066,
+    &quot;p95_ns&quot;: 1293510,
+    &quot;p99_ns&quot;: 2453594,
+    &quot;min_run_median_ns&quot;: 528619,
+    &quot;max_run_median_ns&quot;: 530350,
+    &quot;run_spread_pct&quot;: 0.32669746795307336,
+    &quot;ops_per_sec&quot;: 12567.206467839025,
+    &quot;mallocs_per_op&quot;: 142.598278,
+    &quot;bytes_per_op&quot;: 18106.697072,
     &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;env_on_no_flag&quot;,
-    &quot;n&quot;: 100000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3397.07609,
-    &quot;avg_us&quot;: 3.39707609,
-    &quot;p50_ns&quot;: 1708,
-    &quot;p95_ns&quot;: 8750,
-    &quot;p99_ns&quot;: 23250,
-    &quot;min_ns&quot;: 875,
-    &quot;max_ns&quot;: 156667,
-    &quot;total_ms&quot;: 344.223,
-    &quot;ops_per_sec&quot;: 290508.9635117198,
-    &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 0,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.153594444444444,
+    &quot;median_minus_timing_overhead_ns&quot;: 529814.8464055556
   }
 ]</pre>
     </article>
-
-    <article class="case" id="mode-flag_on">
+    <article class="case" id="mode-flag_on_memprovider">
       <header>
-        <h3><code>flag_on</code> 有 feature flag 且為 enabled（每 call 評估閘門 + 發 span）</h3>
-        <p class="meta">named provider 服務 otel-nats-tracing=true；module env=false（option C 姿勢）。每操作 2 次 OpenFeature Boolean 評估後走 traced 實作。</p>
+        <h3><code>flag_on_memprovider</code> flag=enabled，provider 由測試直接綁（in-memory）</h3>
+        <p class="meta">openfeature.SetNamedProviderAndWait(FlagDomain, memprovider)，未設 endpoint。explicitBind 與 autoInstalled 都是 false，所以每次評估都走 providerBound 慢路徑（3 次 provider registry metadata 讀取）並配一個 250ms 的 timeout context。這是舊版報告量到的路徑，不是本 demo 部署的路徑。</p>
+        <p class="meta">provider 姿勢：<code>memprovider</code> ·
+        RelayPossible：是 ·
+        每次 Publish 的 OpenFeature 評估次數：2</p>
       </header>
       <h4>① 設定步驟</h4>
-      <pre class="code">1. UNSET endpoint（避免真 GOFF）
+      <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
 2. SET OTEL_NATS_TRACING_ENABLED=false
-3. SetNamedProviderAndWait(FlagDomain) otel-nats-tracing=true
+3. openfeature.SetNamedProviderAndWait(FlagDomain, memprovider{otel-nats-tracing=true})
 4. 先裝 provider 再 Connect</pre>
-      <h4>② 各量級平均延遲（µs / call）</h4>
+      <h4>② 各量測結果（µs / op）</h4>
       <table>
-        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
-        <tbody><tr><td>100</td><td>8.49</td><td>4.92</td><td>16.83</td><td>111,644</td><td>是</td><td>0</td></tr><tr><td>1,000</td><td>6.63</td><td>4.83</td><td>12.75</td><td>148,836</td><td>是</td><td>0</td></tr><tr><td>10,000</td><td>6.94</td><td>5.00</td><td>13.25</td><td>143,162</td><td>是</td><td>0</td></tr><tr><td>100,000</td><td>7.39</td><td>5.08</td><td>14.38</td><td>134,456</td><td>是</td><td>0</td></tr></tbody>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>16.62</td><td class='num'>16.35 – 16.65</td><td class='num'>121.4</td><td class='num'>62.04</td><td class='num'>6,479</td><td class='num'>16.58</td></tr><tr><td><code>parallel</code></td><td class='num'>18.76</td><td class='num'>18.73 – 18.86</td><td class='num'>445.1</td><td class='num'>62.01</td><td class='num'>6,340</td><td class='num'>18.73</td></tr></tbody>
       </table>
-      <h4>③ 原始結果 JSON 片段</h4>
+      <h4>③ 原始聚合 JSON</h4>
       <pre class="code">[
   {
-    &quot;mode_id&quot;: &quot;flag_on&quot;,
-    &quot;n&quot;: 100,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 8494.99,
-    &quot;avg_us&quot;: 8.49499,
-    &quot;p50_ns&quot;: 4917,
-    &quot;p95_ns&quot;: 16833,
-    &quot;p99_ns&quot;: 94083,
-    &quot;min_ns&quot;: 2750,
-    &quot;max_ns&quot;: 126583,
-    &quot;total_ms&quot;: 0.895,
-    &quot;ops_per_sec&quot;: 111643.52668503574,
+    &quot;mode_id&quot;: &quot;flag_on_memprovider&quot;,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 16616,
+    &quot;median_us&quot;: 16.616,
+    &quot;trimmed_avg_ns&quot;: 17236.967333333334,
+    &quot;avg_ns&quot;: 22183.166278,
+    &quot;p95_ns&quot;: 40601,
+    &quot;p99_ns&quot;: 121374,
+    &quot;min_run_median_ns&quot;: 16348,
+    &quot;max_run_median_ns&quot;: 16648,
+    &quot;run_spread_pct&quot;: 1.805488685604237,
+    &quot;ops_per_sec&quot;: 44822.356063602194,
+    &quot;mallocs_per_op&quot;: 62.03756,
+    &quot;bytes_per_op&quot;: 6479.326096,
     &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.48193888888889,
+    &quot;median_minus_timing_overhead_ns&quot;: 16582.51806111111
   },
   {
-    &quot;mode_id&quot;: &quot;flag_on&quot;,
-    &quot;n&quot;: 1000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 6629.918,
-    &quot;avg_us&quot;: 6.629918,
-    &quot;p50_ns&quot;: 4833,
-    &quot;p95_ns&quot;: 12750,
-    &quot;p99_ns&quot;: 29667,
-    &quot;min_ns&quot;: 2583,
-    &quot;max_ns&quot;: 140166,
-    &quot;total_ms&quot;: 6.718,
-    &quot;ops_per_sec&quot;: 148836.278902517,
+    &quot;mode_id&quot;: &quot;flag_on_memprovider&quot;,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 18760,
+    &quot;median_us&quot;: 18.76,
+    &quot;trimmed_avg_ns&quot;: 21247.92921111111,
+    &quot;avg_ns&quot;: 132743.297424,
+    &quot;p95_ns&quot;: 42663,
+    &quot;p99_ns&quot;: 445103,
+    &quot;min_run_median_ns&quot;: 18729,
+    &quot;max_run_median_ns&quot;: 18864,
+    &quot;run_spread_pct&quot;: 0.7196162046908315,
+    &quot;ops_per_sec&quot;: 58083.954273583106,
+    &quot;mallocs_per_op&quot;: 62.007792,
+    &quot;bytes_per_op&quot;: 6339.517264,
     &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;flag_on&quot;,
-    &quot;n&quot;: 10000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 6936.5834,
-    &quot;avg_us&quot;: 6.936583400000001,
-    &quot;p50_ns&quot;: 5000,
-    &quot;p95_ns&quot;: 13250,
-    &quot;p99_ns&quot;: 32583,
-    &quot;min_ns&quot;: 2458,
-    &quot;max_ns&quot;: 160625,
-    &quot;total_ms&quot;: 69.85,
-    &quot;ops_per_sec&quot;: 143161.95921035184,
-    &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;flag_on&quot;,
-    &quot;n&quot;: 100000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 7392.84945,
-    &quot;avg_us&quot;: 7.39284945,
-    &quot;p50_ns&quot;: 5083,
-    &quot;p95_ns&quot;: 14375,
-    &quot;p99_ns&quot;: 54917,
-    &quot;min_ns&quot;: 2417,
-    &quot;max_ns&quot;: 190250,
-    &quot;total_ms&quot;: 743.739,
-    &quot;ops_per_sec&quot;: 134455.72490627595,
-    &quot;tracing_enabled&quot;: true,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.15004444444445,
+    &quot;median_minus_timing_overhead_ns&quot;: 18726.849955555557
   }
 ]</pre>
     </article>
-
-    <article class="case" id="mode-flag_off">
+    <article class="case" id="mode-flag_off_memprovider">
       <header>
-        <h3><code>flag_off</code> 有 feature flag 且為 disabled（每 call 仍評估閘門，不發 span）</h3>
-        <p class="meta">named provider 服務 otel-nats-tracing=false。仍做 OpenFeature 評估，但選 direct 實作、不發 span。</p>
+        <h3><code>flag_off_memprovider</code> flag=disabled，provider 由測試直接綁（in-memory）</h3>
+        <p class="meta">同上，但 otel-nats-tracing=false。仍每次評估閘門，只是選 direct 實作、不發 span，所以與 no_flag_no_env 的差額就是純閘門成本（慢路徑版本）。</p>
+        <p class="meta">provider 姿勢：<code>memprovider</code> ·
+        RelayPossible：是 ·
+        每次 Publish 的 OpenFeature 評估次數：2</p>
       </header>
       <h4>① 設定步驟</h4>
-      <pre class="code">1. SET OTEL_NATS_TRACING_ENABLED=false
-2. SetNamedProviderAndWait(FlagDomain) otel-nats-tracing=false</pre>
-      <h4>② 各量級平均延遲（µs / call）</h4>
+      <pre class="code">1. UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
+2. SET OTEL_NATS_TRACING_ENABLED=false
+3. openfeature.SetNamedProviderAndWait(FlagDomain, memprovider{otel-nats-tracing=false})</pre>
+      <h4>② 各量測結果（µs / op）</h4>
       <table>
-        <thead><tr><th>N（Publish 次數）</th><th>avg µs</th><th>p50 µs</th><th>p95 µs</th><th>ops/s</th><th>有 span</th><th>errors</th></tr></thead>
-        <tbody><tr><td>100</td><td>6.17</td><td>3.17</td><td>12.92</td><td>149,561</td><td>否</td><td>0</td></tr><tr><td>1,000</td><td>3.78</td><td>2.29</td><td>8.79</td><td>256,210</td><td>否</td><td>0</td></tr><tr><td>10,000</td><td>3.63</td><td>2.33</td><td>8.29</td><td>272,138</td><td>否</td><td>0</td></tr><tr><td>100,000</td><td>3.64</td><td>2.25</td><td>8.42</td><td>271,169</td><td>否</td><td>0</td></tr></tbody>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>6.90</td><td class='num'>6.66 – 9.45</td><td class='num'>57.88</td><td class='num'>36.02</td><td class='num'>2,353</td><td class='num'>6.87</td></tr><tr><td><code>parallel</code></td><td class='num'>9.81</td><td class='num'>9.75 – 9.87</td><td class='num'>71.31</td><td class='num'>36.00</td><td class='num'>2,293</td><td class='num'>9.78</td></tr></tbody>
       </table>
-      <h4>③ 原始結果 JSON 片段</h4>
+      <h4>③ 原始聚合 JSON</h4>
       <pre class="code">[
   {
-    &quot;mode_id&quot;: &quot;flag_off&quot;,
-    &quot;n&quot;: 100,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 6170.4,
-    &quot;avg_us&quot;: 6.1704,
-    &quot;p50_ns&quot;: 3166,
-    &quot;p95_ns&quot;: 12916,
-    &quot;p99_ns&quot;: 61625,
-    &quot;min_ns&quot;: 1417,
-    &quot;max_ns&quot;: 103375,
-    &quot;total_ms&quot;: 0.668,
-    &quot;ops_per_sec&quot;: 149560.6655449617,
+    &quot;mode_id&quot;: &quot;flag_off_memprovider&quot;,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 6900,
+    &quot;median_us&quot;: 6.9,
+    &quot;trimmed_avg_ns&quot;: 7986.005293333334,
+    &quot;avg_ns&quot;: 10330.155214,
+    &quot;p95_ns&quot;: 18999,
+    &quot;p99_ns&quot;: 57882,
+    &quot;min_run_median_ns&quot;: 6662,
+    &quot;max_run_median_ns&quot;: 9448,
+    &quot;run_spread_pct&quot;: 40.3768115942029,
+    &quot;ops_per_sec&quot;: 95644.56132288055,
+    &quot;mallocs_per_op&quot;: 36.022992,
+    &quot;bytes_per_op&quot;: 2352.554176,
     &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.26851111111111,
+    &quot;median_minus_timing_overhead_ns&quot;: 6866.731488888889
   },
   {
-    &quot;mode_id&quot;: &quot;flag_off&quot;,
-    &quot;n&quot;: 1000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3784.334,
-    &quot;avg_us&quot;: 3.784334,
-    &quot;p50_ns&quot;: 2292,
-    &quot;p95_ns&quot;: 8791,
-    &quot;p99_ns&quot;: 14083,
-    &quot;min_ns&quot;: 1416,
-    &quot;max_ns&quot;: 90041,
-    &quot;total_ms&quot;: 3.903,
-    &quot;ops_per_sec&quot;: 256210.47793246343,
+    &quot;mode_id&quot;: &quot;flag_off_memprovider&quot;,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 9813,
+    &quot;median_us&quot;: 9.813,
+    &quot;trimmed_avg_ns&quot;: 10605.580851111112,
+    &quot;avg_ns&quot;: 61274.056874,
+    &quot;p95_ns&quot;: 19409,
+    &quot;p99_ns&quot;: 71306,
+    &quot;min_run_median_ns&quot;: 9749,
+    &quot;max_run_median_ns&quot;: 9873,
+    &quot;run_spread_pct&quot;: 1.263629878732294,
+    &quot;ops_per_sec&quot;: 124310.98952748258,
+    &quot;mallocs_per_op&quot;: 36.003124,
+    &quot;bytes_per_op&quot;: 2292.655536,
     &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;flag_off&quot;,
-    &quot;n&quot;: 10000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3625.3048,
-    &quot;avg_us&quot;: 3.6253048,
-    &quot;p50_ns&quot;: 2333,
-    &quot;p95_ns&quot;: 8292,
-    &quot;p99_ns&quot;: 13042,
-    &quot;min_ns&quot;: 1292,
-    &quot;max_ns&quot;: 150958,
-    &quot;total_ms&quot;: 36.746,
-    &quot;ops_per_sec&quot;: 272137.84935934533,
-    &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
-  },
-  {
-    &quot;mode_id&quot;: &quot;flag_off&quot;,
-    &quot;n&quot;: 100000,
-    &quot;warmup&quot;: 200,
-    &quot;avg_ns&quot;: 3643.36933,
-    &quot;avg_us&quot;: 3.64336933,
-    &quot;p50_ns&quot;: 2250,
-    &quot;p95_ns&quot;: 8416,
-    &quot;p99_ns&quot;: 14125,
-    &quot;min_ns&quot;: 1291,
-    &quot;max_ns&quot;: 127083,
-    &quot;total_ms&quot;: 368.773,
-    &quot;ops_per_sec&quot;: 271168.8226097571,
-    &quot;tracing_enabled&quot;: false,
-    &quot;errors&quot;: 0
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.121094444444445,
+    &quot;median_minus_timing_overhead_ns&quot;: 9779.878905555555
   }
 ]</pre>
     </article>
-
+    <article class="case" id="mode-flag_on_relay">
+      <header>
+        <h3><code>flag_on_relay</code> 部署姿勢 option C：endpoint 自動安裝 GOFF provider，flag=enabled</h3>
+        <p class="meta">設定 OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT 指向 relay，由 otel-flags 自行建立並綁定 GO Feature Flag in-process provider（autoInstalled=true）。providerBound 走兩個 atomic load 的快路徑、evaluationContext 直接回 context.Background()，但 rule 評估是真的 GOFF。這才是 deploy/base/backend.yaml 跑的路徑。</p>
+        <p class="meta">provider 姿勢：<code>relay</code> ·
+        RelayPossible：是 ·
+        每次 Publish 的 OpenFeature 評估次數：2</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
+2. SET OTEL_NATS_TRACING_ENABLED=false
+3. SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=&lt;fake relay&gt;
+4. SET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=2s
+5. relay 提供 otel-nats-tracing=enabled（master key 刻意不提供，與 demo ConfigMap 一致）</pre>
+      <h4>② 各量測結果（µs / op）</h4>
+      <table>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>19.67</td><td class='num'>19.50 – 20.07</td><td class='num'>141.9</td><td class='num'>72.05</td><td class='num'>8,285</td><td class='num'>19.64</td></tr><tr><td><code>parallel</code></td><td class='num'>21.41</td><td class='num'>21.29 – 21.43</td><td class='num'>579.8</td><td class='num'>72.01</td><td class='num'>8,154</td><td class='num'>21.37</td></tr><tr><td><code>roundtrip</code></td><td class='num'>864.4</td><td class='num'>859.9 – 869.2</td><td class='num'>4,677.5</td><td class='num'>322.85</td><td class='num'>34,464</td><td class='num'>864.4</td></tr></tbody>
+      </table>
+      <h4>③ 原始聚合 JSON</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;flag_on_relay&quot;,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 19671,
+    &quot;median_us&quot;: 19.671,
+    &quot;trimmed_avg_ns&quot;: 20919.699264444444,
+    &quot;avg_ns&quot;: 26621.207844,
+    &quot;p95_ns&quot;: 47902,
+    &quot;p99_ns&quot;: 141861,
+    &quot;min_run_median_ns&quot;: 19499,
+    &quot;max_run_median_ns&quot;: 20066,
+    &quot;run_spread_pct&quot;: 2.882415738904987,
+    &quot;ops_per_sec&quot;: 37384.722656223545,
+    &quot;mallocs_per_op&quot;: 72.048706,
+    &quot;bytes_per_op&quot;: 8284.544304,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.199333333333335,
+    &quot;median_minus_timing_overhead_ns&quot;: 19637.800666666666
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_on_relay&quot;,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 21409,
+    &quot;median_us&quot;: 21.409,
+    &quot;trimmed_avg_ns&quot;: 24547.414137777778,
+    &quot;avg_ns&quot;: 152551.387062,
+    &quot;p95_ns&quot;: 50341,
+    &quot;p99_ns&quot;: 579786,
+    &quot;min_run_median_ns&quot;: 21289,
+    &quot;max_run_median_ns&quot;: 21432,
+    &quot;run_spread_pct&quot;: 0.6679433882946424,
+    &quot;ops_per_sec&quot;: 51081.006708239765,
+    &quot;mallocs_per_op&quot;: 72.010912,
+    &quot;bytes_per_op&quot;: 8153.50928,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 41.71412222222222,
+    &quot;median_minus_timing_overhead_ns&quot;: 21367.285877777776
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_on_relay&quot;,
+    &quot;kind&quot;: &quot;roundtrip&quot;,
+    &quot;repeats&quot;: 3,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 864440,
+    &quot;median_us&quot;: 864.44,
+    &quot;trimmed_avg_ns&quot;: 972364.1176733334,
+    &quot;avg_ns&quot;: 1100859.012394,
+    &quot;p95_ns&quot;: 2453846,
+    &quot;p99_ns&quot;: 4677525,
+    &quot;min_run_median_ns&quot;: 859864,
+    &quot;max_run_median_ns&quot;: 869177,
+    &quot;run_spread_pct&quot;: 1.0773448706677156,
+    &quot;ops_per_sec&quot;: 7227.426603470979,
+    &quot;mallocs_per_op&quot;: 322.848386,
+    &quot;bytes_per_op&quot;: 34464.103904,
+    &quot;tracing_enabled&quot;: true,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 8,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.14051111111111,
+    &quot;median_minus_timing_overhead_ns&quot;: 864406.8594888889
+  }
+]</pre>
+    </article>
+    <article class="case" id="mode-flag_off_relay">
+      <header>
+        <h3><code>flag_off_relay</code> 部署姿勢 option C，flag=disabled（kill switch 已按下）</h3>
+        <p class="meta">同上但 relay 提供 otel-nats-tracing=disabled。仍每次評估閘門、不發 span — 這是「用 relay 關掉 instrumentation 之後，還留下多少成本」的答案。</p>
+        <p class="meta">provider 姿勢：<code>relay</code> ·
+        RelayPossible：是 ·
+        每次 Publish 的 OpenFeature 評估次數：2</p>
+      </header>
+      <h4>① 設定步驟</h4>
+      <pre class="code">1. SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1
+2. SET OTEL_NATS_TRACING_ENABLED=false
+3. SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=&lt;fake relay&gt;
+4. relay 提供 otel-nats-tracing=disabled</pre>
+      <h4>② 各量測結果（µs / op）</h4>
+      <table>
+        <thead><tr><th>kind</th><th>中位數</th><th>各 run 中位數範圍</th><th>p99</th>
+        <th>allocs/op</th><th>B/op</th><th>扣掉計時開銷</th></tr></thead>
+        <tbody><tr><td><code>publish</code></td><td class='num'>11.53</td><td class='num'>11.39 – 11.69</td><td class='num'>86.15</td><td class='num'>46.03</td><td class='num'>4,157</td><td class='num'>11.50</td></tr><tr><td><code>parallel</code></td><td class='num'>12.49</td><td class='num'>12.42 – 12.55</td><td class='num'>155.5</td><td class='num'>46.00</td><td class='num'>4,106</td><td class='num'>12.46</td></tr><tr><td><code>roundtrip</code></td><td class='num'>587.1</td><td class='num'>586.9 – 595.6</td><td class='num'>2,577.2</td><td class='num'>224.52</td><td class='num'>20,107</td><td class='num'>587.0</td></tr></tbody>
+      </table>
+      <h4>③ 原始聚合 JSON</h4>
+      <pre class="code">[
+  {
+    &quot;mode_id&quot;: &quot;flag_off_relay&quot;,
+    &quot;kind&quot;: &quot;publish&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 1,
+    &quot;median_ns&quot;: 11533,
+    &quot;median_us&quot;: 11.533,
+    &quot;trimmed_avg_ns&quot;: 11730.547855555556,
+    &quot;avg_ns&quot;: 15290.33477,
+    &quot;p95_ns&quot;: 27442,
+    &quot;p99_ns&quot;: 86151,
+    &quot;min_run_median_ns&quot;: 11388,
+    &quot;max_run_median_ns&quot;: 11687,
+    &quot;run_spread_pct&quot;: 2.5925604786265497,
+    &quot;ops_per_sec&quot;: 64866.70657161804,
+    &quot;mallocs_per_op&quot;: 46.03062,
+    &quot;bytes_per_op&quot;: 4157.202224,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.13409444444444,
+    &quot;median_minus_timing_overhead_ns&quot;: 11499.865905555556
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_off_relay&quot;,
+    &quot;kind&quot;: &quot;parallel&quot;,
+    &quot;repeats&quot;: 5,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 12490,
+    &quot;median_us&quot;: 12.49,
+    &quot;trimmed_avg_ns&quot;: 13882.079362222223,
+    &quot;avg_ns&quot;: 80285.016208,
+    &quot;p95_ns&quot;: 26648,
+    &quot;p99_ns&quot;: 155466,
+    &quot;min_run_median_ns&quot;: 12416,
+    &quot;max_run_median_ns&quot;: 12551,
+    &quot;run_spread_pct&quot;: 1.0808646917534028,
+    &quot;ops_per_sec&quot;: 94905.35341741731,
+    &quot;mallocs_per_op&quot;: 46.004374,
+    &quot;bytes_per_op&quot;: 4105.5592,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 2,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.168933333333335,
+    &quot;median_minus_timing_overhead_ns&quot;: 12456.831066666668
+  },
+  {
+    &quot;mode_id&quot;: &quot;flag_off_relay&quot;,
+    &quot;kind&quot;: &quot;roundtrip&quot;,
+    &quot;repeats&quot;: 3,
+    &quot;workers&quot;: 8,
+    &quot;median_ns&quot;: 587058,
+    &quot;median_us&quot;: 587.058,
+    &quot;trimmed_avg_ns&quot;: 638553.1380066667,
+    &quot;avg_ns&quot;: 715100.402922,
+    &quot;p95_ns&quot;: 1499699,
+    &quot;p99_ns&quot;: 2577151,
+    &quot;min_run_median_ns&quot;: 586903,
+    &quot;max_run_median_ns&quot;: 595628,
+    &quot;run_spread_pct&quot;: 1.4862245297738894,
+    &quot;ops_per_sec&quot;: 11132.128062504984,
+    &quot;mallocs_per_op&quot;: 224.52251,
+    &quot;bytes_per_op&quot;: 20106.736256,
+    &quot;tracing_enabled&quot;: false,
+    &quot;errors&quot;: 0,
+    &quot;timeouts&quot;: 0,
+    &quot;evals_per_op&quot;: 8,
+    &quot;clock_granularity_ns&quot;: 34,
+    &quot;timing_overhead_ns&quot;: 33.101727777777775,
+    &quot;median_minus_timing_overhead_ns&quot;: 587024.8982722223
+  }
+]</pre>
+    </article>
 
     <h2 id="repro">如何重跑</h2>
-    <pre class="code"># 跑效能套件 → docs/evidence/perf/gate-latency.json
-cd backend &amp;&amp; go test ./internal/flagperf/ -v -count=1
+    <pre class="code"># 全套量測 → docs/evidence/perf/gate-latency.json（約 25 分鐘）
+cd backend &amp;&amp; go test ./internal/flagperf/ -run TestGateLatencyEvidence -v -count=1 -timeout 60m
+
+# 縮小規模的煙霧測試
+FLAGPERF_TOTAL_OPS=5000 FLAGPERF_RT_OPS=2000 FLAGPERF_REPEATS=2 FLAGPERF_RT_REPEATS=1 \
+  go test ./internal/flagperf/ -run TestGateLatencyEvidence -count=1
+
+# allocs/op 與 benchstat（一個 mode 一個行程 — provider 安裝是 process latch）
+for m in no_flag_no_env env_on_no_flag flag_off_memprovider \
+         flag_on_memprovider flag_off_relay flag_on_relay; do
+  FLAGPERF_MODE=$m go test ./internal/flagperf/ -run &#x27;^$&#x27; \
+    -bench &#x27;BenchmarkPublish$&#x27; -benchmem -count=10 | tee &quot;bench-$m.txt&quot;
+done
+benchstat bench-no_flag_no_env.txt bench-flag_on_relay.txt
 
 # 產生 HTML
 python3 docs/scripts/render-gate-latency-html.py
-
-# 開啟
-open docs/otel-nats-gate-latency.zh-TW.html
 </pre>
 
     <div class="callout">
       原始證據：<code>docs/evidence/perf/gate-latency.json</code> ·
-      測試日誌：<code>docs/evidence/perf/gate-latency-test.log</code> ·
-      測試碼：<code>backend/internal/flagperf/gate_latency_test.go</code>
+      測試碼：<code>backend/internal/flagperf/</code>
+      （<code>gate_latency_test.go</code> 驅動、<code>harness_test.go</code> 量測、
+      <code>relay_test.go</code> 假 relay、<code>bench_test.go</code> benchstat 入口）
     </div>
 
     <footer>
-      這是單機、嵌入式 NATS、記憶體 tracer 的微基準，用來比較<strong>閘門評估</strong>相對量級，
-      不是端到端 HTTP/OTLP 吞吐 SLA。網路 OTLP export、relay 遠端 poll 會另加延遲。
+      這是單機、行程內 NATS、丟棄式 span exporter 的微基準，用來比較<strong>閘門評估</strong>的相對量級，
+      不是端到端 HTTP/OTLP 吞吐 SLA。網路 OTLP export 與 relay 遠端輪詢都會另外加上延遲。
     </footer>
   </main>
 </div>

@@ -58,7 +58,6 @@ relayproxy:
     server:
       mode: http
       port: 1031
-      monitoringPort: 1032
     pollingInterval: 1000
     startWithRetrieverError: false
     logLevel: debug
@@ -68,6 +67,142 @@ relayproxy:
     exporter:
       kind: log
 ```
+
+Without it, the liveness and readiness probes go to the HTTP port and only that
+one port is exposed.
+
+The port is read from the *parsed* config, so a `monitoringPort` that is only
+mentioned in a comment is correctly ignored.
+
+## Flag Definition Files
+
+Instead of pointing `relayproxy.config` at a retriever by hand, you can keep the
+flag definitions in the chart, one file per concern, the way Grafana charts keep
+one file per dashboard:
+
+```
+relay-proxy/
+  config/
+    checkout-flags.yaml
+    otel-nats-tracing.yaml
+```
+
+```yaml
+flags:
+  enabled: true
+```
+
+Every `*.yaml`, `*.yml` and `*.json` directly under `flags.dir` becomes a key of
+a `<release>-relay-proxy-flags` ConfigMap, mounted at `flags.mountPath`
+(`/flags` by default). Because GO Feature Flag's `file` retriever takes a single
+file rather than a directory, the chart appends one retriever per file to the
+config it renders:
+
+```yaml
+retrievers:
+  - kind: file
+    path: /flags/checkout-flags.yaml
+  - kind: file
+    path: /flags/otel-nats-tracing.yaml
+```
+
+So `relayproxy.config` must not declare a `retriever`/`retrievers` of its own —
+templating fails rather than silently overwriting it. Templating also fails when
+`flags.dir` matches no file, because a relay proxy with no flags still starts,
+still reports healthy, and answers every evaluation with the caller's default.
+
+Sub-directories are not descended: the mounted ConfigMap is flat, and two files
+of the same base name would silently collide.
+
+Nothing hashes the flag ConfigMap into the pod template. A flag change must not
+roll the pod — the relay proxy re-reads the mounted files every
+`pollingInterval`, so `kubectl edit configmap <release>-relay-proxy-flags` takes
+effect with no restart, once the kubelet has refreshed the mount (its own sync
+period, so budget ~60s).
+
+A live edit like that lasts until the next `helm upgrade` re-renders the
+ConfigMap from `flags.dir` — but that upgrade needs `--force-conflicts`:
+
+```shell
+helm upgrade relay-proxy . -f values.yaml --force-conflicts
+```
+
+Helm owns the ConfigMap through server-side apply, and editing it hands `.data`
+to the `kubectl` field manager. Server-side apply raises a conflict only when
+the two values disagree, so an untouched flag upgrades fine and a flipped one
+aborts the upgrade with:
+
+```
+Apply failed with 1 conflict: conflict with "kubectl-client-side-apply" using v1: .data.<file>
+```
+
+`--force-conflicts` states what is already true: `flags.dir` is the source of
+truth and a live flip is temporary.
+
+## API Key Authentication (Vault-backed)
+
+Set `apiKeyAuth.enabled=true` to require an API key on the relay proxy's
+evaluation endpoints. Callers must then send an `Authorization: Bearer <key>`
+header; `/health`, `/info` and `/metrics` stay unauthenticated so the liveness
+and readiness probes (and any metrics scraper) keep working unchanged.
+
+The key itself is never rendered into the chart, into `relayproxy.config`, or
+into git. The chart creates a **VaultSecret** custom resource; the Vault secret
+operator in the cluster reconciles it into a Kubernetes `Secret` of the same
+name, and the deployment injects that Secret's entries into the container as
+environment variables. The relay proxy reads `AUTHORIZEDKEYS_EVALUATION` and
+`AUTHORIZEDKEYS_ADMIN` as comma-separated lists and overlays them onto
+`authorizedKeys.evaluation` / `authorizedKeys.admin`, which is why the config
+ConfigMap needs no change at all:
+
+```
+Vault  ──▶  VaultSecret  ──▶  Secret  ──▶  AUTHORIZEDKEYS_EVALUATION  ──▶  authorizedKeys.evaluation
+           (this chart)      (operator)         (env var)                      (relay proxy config)
+```
+
+### Example
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    path: kv/goff/relay-proxy
+```
+
+This renders a `VaultSecret` named `<release>-relay-proxy-api-key` and injects
+the Secret's `evaluation-api-key` entry as `AUTHORIZEDKEYS_EVALUATION`.
+
+### Using a different Vault CRD
+
+`apiKeyAuth.vaultSecret.apiVersion` / `.kind` and the free-form
+`apiKeyAuth.vaultSecret.extraSpec` make the resource portable across operators.
+For the HashiCorp Vault Secrets Operator:
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    apiVersion: secrets.hashicorp.com/v1beta1
+    kind: VaultStaticSecret
+    path: goff/relay-proxy
+    extraSpec:
+      mount: kv
+      type: kv-v2
+      vaultAuthRef: default
+      refreshAfter: 60s
+```
+
+### Bringing your own Secret
+
+Set `apiKeyAuth.vaultSecret.create=false` and point
+`apiKeyAuth.vaultSecret.name` at an existing Secret to consume a key that
+something else already manages. Either way the Secret must exist by the time the
+pod starts, otherwise the pod sits in `CreateContainerConfigError`.
+
+### Admin keys
+
+`apiKeyAuth.adminSecretKey` is empty by default, so no admin key is injected.
+Set it to a key of the same Secret to also protect the `/v1/admin` endpoints.
 
 {{ template "chart.homepageLine" . }}
 
