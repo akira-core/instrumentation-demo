@@ -1,5 +1,27 @@
 # docs
 
+## 量測環境
+
+三份證據（單元矩陣、targeting、效能）與叢集實測**都在同一台機器上取得**，
+叢集是同一台機器上的 kind：
+
+| 項目 | 值 |
+|---|---|
+| OS / arch | linux/amd64 |
+| CPU | 2 vCPU，Intel Xeon @ 2.20GHz |
+| cgroup | `cpu.max=200000 100000`（= 2 顆核心） |
+| RAM | 7.7 GiB |
+| Go | go1.26.5 |
+| 叢集 | `kind-demo-trace`（`kind create cluster --config deploy/kind-cluster.yaml`） |
+
+先前效能數字取自一台筆電，而叢集證據來自另一個環境，兩半在講不同的硬體。
+現在兩者一致，`gate-latency.json` 的 `env` 區塊與 `live-summary.json` 的 `cluster`
+欄位都會記錄實際取得證據的機器，不需要靠 README 宣稱。
+
+叢集實測只部署 live 證據需要的元件（namespace、feature-flags ConfigMap、
+backend、NATS、ClickHouse + rotel、relay proxy）；Grafana、VictoriaMetrics 與
+frontend 在這個規模的機器上與證據無關，因此略過。完整堆疊請用 `make deploy`。
+
 ## otel-nats 功能旗標矩陣報告（繁中）
 
 - **報告 HTML**：[`otel-nats-feature-flag-matrix.zh-TW.html`](./otel-nats-feature-flag-matrix.zh-TW.html)
@@ -123,6 +145,31 @@ domain 綁定的方法。在同一個行程裡依序量多個 mode，後面的 m
 
 主指標是**中位數**與**差額**，不是平均與倍數：對次微秒的基準取比值會得到很大但
 沒有決策價值的數字。
+
+### 哪些數字可以引用，哪些只能讀方向
+
+**run 內很穩，campaign 之間會漂。** 同一份 evidence 裡每個 mode 跑 5 個獨立子行程，
+彼此的離散多在 5% 以下；但整份重跑之間，中位數會漂到 22%。這台是 2 vCPU 的共用 VM，
+機器狀態在 campaign 之間的變化大於某些效應本身。
+
+因此分兩類看：
+
+| 比較 | 差額 | 可引用性 |
+|---|---|---|
+| 加閘門 vs 零閘門 | ~+10 到 +20 µs | 遠大於漂移，可引用 |
+| span 成本（無閘門） | ~+5 µs | 可引用 |
+| 往返吞吐（ops/s） | 降到 27% | 可引用 |
+| **memprovider vs relay 姿勢** | +0.3 到 +4.8 µs | **只能讀方向，不要引用微秒數** |
+
+最後一列是唯一一個效應與漂移同量級的比較。四次獨立 campaign：
++3.76、+0.26、+4.75 µs，加上 benchstat 的 +53.5%（p=0.000，n=10 —— 但那個 p 值只在單次
+benchstat 內有效，不涵蓋 campaign 之間的漂移）。方向一致（relay 較貴），數值不可靠。
+
+**判斷穩定性請看 allocs/op。** 它不隨主機負載變動，四次 campaign 都到小數點後兩位一致，
+且與 `go test -benchmem` 完全吻合（[`evidence/perf/benchstat.txt`](./evidence/perf/benchstat.txt)）。
+姿勢差異在配置次數上是硬的：**每次 Publish 固定多 10 次配置**（每次評估多 5 次），
+四次 campaign 皆為 +10.01。所以「部署姿勢比舊版量的那個姿勢貴」這個結論站在配置次數上，
+不站在微秒上。
 
 ### 縮小的 run 不會覆蓋 evidence
 

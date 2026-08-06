@@ -265,6 +265,13 @@ var caveatsZH = []string{
 	"「要送 trace 時加閘門的增量」會略高於「純閘門成本」，即使兩者都是同樣的兩次評估。" +
 		"差異來自 GC：已經在高配置速率下的模式，每次操作要分攤的 GC 工作也比較多。" +
 		"allocs/op 的差額在兩種算法下相同，可以據此對照。",
+	"**跨 campaign 的漂移**：run 內的離散很小（run_spread_pct 多在 5% 以下），但整份重跑之間" +
+		"中位數會漂移到 22%。這台是 2 vCPU 的共用 VM，機器狀態在 campaign 之間的變化大於某些效應本身。" +
+		"因此：差額大於漂移的比較（加閘門 vs 零閘門、span 成本、往返吞吐）可以直接引用；" +
+		"差額與漂移同量級的比較 —— 目前只有 memprovider vs relay 這一對 —— 只能讀方向，不能引用微秒數。",
+	"要判斷一個結論穩不穩，看 allocs/op：它不隨主機負載變動，四次獨立 campaign 都到小數點後兩位一致，" +
+		"且與 go test -benchmem 完全吻合（docs/evidence/perf/benchstat.txt）。" +
+		"時間數字則應以中位數與跨 campaign 範圍一起看，不要單看一次。",
 }
 
 const isolationZH = "每個 mode 一個子行程。原因：otel-flags 的 installDone / autoInstalled / explicitBind 是 process 生命週期的 latch，" +
@@ -427,9 +434,12 @@ func compare(aggs []Aggregate) []Comparison {
 		{kindPublish, "純閘門成本（測試姿勢）", "flag_off_memprovider", "no_flag_no_env",
 			"同上，但 provider 由測試直接綁：多付 providerBound 慢路徑與每次評估一個 timeout context。"},
 		{kindPublish, "測試姿勢 vs 部署姿勢", "flag_off_memprovider", "flag_off_relay",
-			"舊版報告量的是左邊，demo 部署跑的是右邊。差額為負代表舊數字「低估」了部署：" +
-				"測試姿勢省下的（3 次 registry 讀取 + 每次評估一個 timeout context）" +
-				"少於 GOFF in-process rule 評估多付的（context 轉換與 variation 查找）。方向由量測決定，不預設。"},
+			"舊版報告量的是左邊，demo 部署跑的是右邊。**時間差請只讀方向、不要引用數值** — " +
+				"跨 campaign 重跑時這一對的差額在 +0.3µs 到 +4.8µs 之間漂移，" +
+				"漂移幅度與效應本身同量級（見 caveats）。可以引用的是 allocs/op：" +
+				"每次 Publish 固定多 10 次配置（每次評估多 5 次），四次獨立 campaign 皆為 +10.01，" +
+				"配置次數不受主機負載影響。原因是測試姿勢省下的（3 次 registry 讀取 + 每次評估一個 timeout context）" +
+				"少於 GOFF in-process rule 評估多付的（context 轉換與 variation 查找）。"},
 		{kindPublish, "span 成本（無閘門）", "env_on_no_flag", "no_flag_no_env",
 			"只開 env、不走 OpenFeature：差額是建立 span、組 attribute 與注入 W3C header 的成本。"},
 		{kindPublish, "要送 trace 時加閘門的增量", "flag_on_relay", "env_on_no_flag",
