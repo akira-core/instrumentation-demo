@@ -26,6 +26,7 @@ package flagtargeting
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -289,7 +290,7 @@ func waitForRelay() error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return fmt.Errorf("relay provider never became ready within 30s")
+	return errors.New("relay provider never became ready within 30s")
 }
 
 func emit(t *testing.T, res Result) {

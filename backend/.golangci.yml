@@ -1,0 +1,59 @@
+# golangci-lint v2, mirroring third_party/instrumentation-go/.golangci.yml so the
+# demo and the library it exercises are held to one standard. Two deliberate
+# differences: the local import prefix is this module, and testifylint is absent
+# because nothing here uses testify.
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  go: '1.25'
+
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - unparam
+    - prealloc
+    - revive
+    - gosec
+    - errorlint
+    - exptostd
+    - perfsprint
+    - predeclared
+    - usestdlibvars
+    - whitespace
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+    gosec:
+      excludes:
+        - G304  # file path from variable (e.g. config) — allow where appropriate
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/akira-core/instrumentation-demo

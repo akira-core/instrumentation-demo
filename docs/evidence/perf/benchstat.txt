@@ -1,0 +1,50 @@
+# benchstat — otel-nats feature-flag gate, one process per mode
+#
+# go test ./internal/flagperf/ -run '^$' -bench 'BenchmarkPublish$' -benchmem -count=10
+# FLAGPERF_MODE selects the mode; one process per mode is mandatory because
+# otel-flags latches its provider install for the process lifetime.
+#
+goos: linux
+goarch: amd64
+pkg: github.com/akira-core/instrumentation-demo/backend/internal/flagperf
+cpu: Intel(R) Xeon(R) CPU @ 2.20GHz
+
+== 純閘門成本：部署姿勢 (relay) vs 測試姿勢 (memprovider), flag off ==
+== 舊版報告量左邊，demo 部署跑右邊 ==
+          │ flag_off_memprovider.txt │          flag_off_relay.txt          │
+          │          sec/op          │    sec/op     vs base                │
+Publish-2               16.59µ ± 17%   25.47µ ± 21%  +53.53% (p=0.000 n=10)
+
+          │ flag_off_memprovider.txt │          flag_off_relay.txt          │
+          │           B/op           │     B/op      vs base                │
+Publish-2               2.292Ki ± 0%   4.063Ki ± 0%  +77.31% (p=0.000 n=10)
+
+          │ flag_off_memprovider.txt │         flag_off_relay.txt         │
+          │        allocs/op         │ allocs/op   vs base                │
+Publish-2                 36.00 ± 0%   46.00 ± 0%  +27.78% (p=0.000 n=10)
+
+== 加閘門的增量（兩邊都發 span）：env_on_no_flag vs flag_on_relay ==
+          │ env_on_no_flag.txt │           flag_on_relay.txt           │
+          │       sec/op       │    sec/op     vs base                 │
+Publish-2         15.64µ ± 29%   39.83µ ± 33%  +154.63% (p=0.000 n=10)
+
+          │ env_on_no_flag.txt │          flag_on_relay.txt           │
+          │        B/op        │     B/op      vs base                │
+Publish-2         4.086Ki ± 0%   8.094Ki ± 0%  +98.10% (p=0.000 n=10)
+
+          │ env_on_no_flag.txt │          flag_on_relay.txt          │
+          │     allocs/op      │ allocs/op   vs base                 │
+Publish-2           27.00 ± 4%   72.00 ± 0%  +166.67% (p=0.000 n=10)
+
+== span 成本（無閘門）：no_flag_no_env vs env_on_no_flag ==
+          │ no_flag_no_env.txt │            env_on_no_flag.txt            │
+          │       sec/op       │     sec/op      vs base                  │
+Publish-2         687.2n ± 20%   15642.5n ± 29%  +2176.27% (p=0.000 n=10)
+
+          │ no_flag_no_env.txt │           env_on_no_flag.txt            │
+          │        B/op        │     B/op      vs base                   │
+Publish-2           14.00 ± 0%   4184.00 ± 0%  +29785.71% (p=0.000 n=10)
+
+          │ no_flag_no_env.txt │      env_on_no_flag.txt      │
+          │     allocs/op      │ allocs/op   vs base          │
+Publish-2            0.00 ± 0%   27.00 ± 4%  ? (p=0.000 n=10)

@@ -96,7 +96,7 @@ func Setup(ctx context.Context, serviceName, otlpEndpoint string) (ShutdownFunc,
 // plus whether the connection should be established without TLS.
 func splitEndpoint(raw string) (endpoint string, insecure bool, err error) {
 	if raw == "" {
-		return "", false, fmt.Errorf("empty OTLP endpoint")
+		return "", false, errors.New("empty OTLP endpoint")
 	}
 
 	u, parseErr := url.Parse(raw)

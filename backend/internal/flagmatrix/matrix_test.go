@@ -533,7 +533,7 @@ func runCase(t *testing.T, natsURL string, tc Case) Result {
 		{envPoll, tc.PollEnv},
 	} {
 		if e.val == nil {
-			r.Evidence = append(r.Evidence, fmt.Sprintf("UNSET %s", e.name))
+			r.Evidence = append(r.Evidence, "UNSET "+e.name)
 			continue
 		}
 		t.Setenv(e.name, *e.val)
