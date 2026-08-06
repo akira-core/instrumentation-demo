@@ -69,6 +69,71 @@ relayproxy:
       kind: log
 ```
 
+## API Key Authentication (Vault-backed)
+
+Set `apiKeyAuth.enabled=true` to require an API key on the relay proxy's
+evaluation endpoints. Callers must then send an `Authorization: Bearer <key>`
+header; `/health`, `/info` and `/metrics` stay unauthenticated so the liveness
+and readiness probes (and any metrics scraper) keep working unchanged.
+
+The key itself is never rendered into the chart, into `relayproxy.config`, or
+into git. The chart creates a **VaultSecret** custom resource; the Vault secret
+operator in the cluster reconciles it into a Kubernetes `Secret` of the same
+name, and the deployment injects that Secret's entries into the container as
+environment variables. The relay proxy reads `AUTHORIZEDKEYS_EVALUATION` and
+`AUTHORIZEDKEYS_ADMIN` as comma-separated lists and overlays them onto
+`authorizedKeys.evaluation` / `authorizedKeys.admin`, which is why the config
+ConfigMap needs no change at all:
+
+```
+Vault  ──▶  VaultSecret  ──▶  Secret  ──▶  AUTHORIZEDKEYS_EVALUATION  ──▶  authorizedKeys.evaluation
+           (this chart)      (operator)         (env var)                      (relay proxy config)
+```
+
+### Example
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    path: kv/goff/relay-proxy
+```
+
+This renders a `VaultSecret` named `<release>-relay-proxy-api-key` and injects
+the Secret's `evaluation-api-key` entry as `AUTHORIZEDKEYS_EVALUATION`.
+
+### Using a different Vault CRD
+
+`apiKeyAuth.vaultSecret.apiVersion` / `.kind` and the free-form
+`apiKeyAuth.vaultSecret.extraSpec` make the resource portable across operators.
+For the HashiCorp Vault Secrets Operator:
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    apiVersion: secrets.hashicorp.com/v1beta1
+    kind: VaultStaticSecret
+    path: goff/relay-proxy
+    extraSpec:
+      mount: kv
+      type: kv-v2
+      vaultAuthRef: default
+      refreshAfter: 60s
+```
+
+### Bringing your own Secret
+
+Set `apiKeyAuth.vaultSecret.create=false` and point
+`apiKeyAuth.vaultSecret.name` at an existing Secret to consume a key that
+something else already manages. Either way the Secret must exist by the time the
+pod starts, otherwise the pod sits in `CreateContainerConfigError`.
+
+### Admin keys
+
+`apiKeyAuth.adminSecretKey` is empty by default, so no admin key is injected.
+Set it to a key of the same Secret to also protect the `/v1/admin` endpoints.
+
 {{ template "chart.homepageLine" . }}
 
 {{ template "chart.maintainersSection" . }}

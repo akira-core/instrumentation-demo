@@ -167,3 +167,49 @@ extraManifests: []
 #      kind: Role
 #      name: feature-flags-relay-proxy
 #      apiGroup: ""
+
+# -- API key authentication for the relay proxy. The keys themselves never live
+# in the chart or in git: a VaultSecret resource materialises a Kubernetes
+# Secret, and the deployment injects that Secret's entries as environment
+# variables. The relay proxy maps `AUTHORIZEDKEYS_EVALUATION` and
+# `AUTHORIZEDKEYS_ADMIN` (comma-separated) onto `authorizedKeys.evaluation` and
+# `authorizedKeys.admin`, so `relayproxy.config` needs no change.
+apiKeyAuth:
+  # -- Enable API key authentication. Callers must then send an
+  # `Authorization: Bearer <key>` header on the evaluation endpoints;
+  # `/health`, `/info` and `/metrics` stay unauthenticated.
+  enabled: false
+  # -- Key inside the Secret holding the evaluation API keys (comma-separated
+  # for several). Set to "" to not inject an evaluation key.
+  evaluationSecretKey: "evaluation-api-key"
+  # -- Key inside the Secret holding the admin API keys (used by the `/v1/admin`
+  # endpoints). Set to "" to not inject an admin key.
+  adminSecretKey: ""
+  # -- Environment variable receiving the evaluation API keys
+  evaluationEnvVar: "AUTHORIZEDKEYS_EVALUATION"
+  # -- Environment variable receiving the admin API keys
+  adminEnvVar: "AUTHORIZEDKEYS_ADMIN"
+  vaultSecret:
+    # -- Create the VaultSecret resource. Set to false to consume a Secret that
+    # already exists (or is produced by something else) under `name` below.
+    create: true
+    # -- apiVersion of the VaultSecret custom resource, so the chart works with
+    # whichever Vault secret CRD the cluster provides
+    apiVersion: "ricoberger.de/v1alpha1"
+    # -- kind of the custom resource
+    kind: "VaultSecret"
+    # -- Name of the VaultSecret and of the Secret it produces (accepts
+    # template). Defaults to `<fullname>-api-key`.
+    name: ""
+    # -- Annotations to add to the VaultSecret (accepts template)
+    annotations: {}
+    # -- Path in Vault holding the API keys
+    path: "kv/goff/relay-proxy"
+    # -- Type of the Kubernetes Secret produced from the Vault path
+    secretType: "Opaque"
+    # -- Restrict which Vault keys are copied into the Secret; empty copies all
+    keys: []
+    # -- Extra fields merged into the VaultSecret `spec`, for CRD-specific
+    # settings such as `vaultAuthRef`, `mount` or `refreshAfter` (accepts
+    # template)
+    extraSpec: {}

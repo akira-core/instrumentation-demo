@@ -14,7 +14,13 @@ Install as:  helm install relay-proxy charts/relay-proxy -f deploy/values/relay-
 
 Upgrading is an explicit re-pull + diff review, never automatic.
 
-Local patches (re-apply after any re-pull):
+Local modifications (re-apply after any re-pull — upstream has none of this):
   - templates/deployment.yaml — honor .Values.extraVolumes / .Values.extraVolumeMounts
   - values.yaml — declare empty extraVolumes / extraVolumeMounts defaults
-  Reason: mount demo-feature-flags for GOFF kind: file retriever (no ConfigMap API RBAC).
+    Reason: mount demo-feature-flags for GOFF kind: file retriever (no ConfigMap API RBAC).
+  - apiKeyAuth.* in values.yaml, templates/vaultsecret.yaml,
+    relay-proxy.apiKeySecretName / relay-proxy.apiKeyEnv in templates/_helpers.tpl,
+    the env block in templates/deployment.yaml, the API-key section in NOTES.txt
+    and README.md(.gotmpl), and tests/api_key_auth_test.yaml.
+    Gates the relay proxy behind an API key sourced from a VaultSecret; see the
+    "API Key Authentication" section of README.md.

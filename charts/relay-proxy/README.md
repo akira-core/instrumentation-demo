@@ -70,6 +70,71 @@ relayproxy:
       kind: log
 ```
 
+## API Key Authentication (Vault-backed)
+
+Set `apiKeyAuth.enabled=true` to require an API key on the relay proxy's
+evaluation endpoints. Callers must then send an `Authorization: Bearer <key>`
+header; `/health`, `/info` and `/metrics` stay unauthenticated so the liveness
+and readiness probes (and any metrics scraper) keep working unchanged.
+
+The key itself is never rendered into the chart, into `relayproxy.config`, or
+into git. The chart creates a **VaultSecret** custom resource; the Vault secret
+operator in the cluster reconciles it into a Kubernetes `Secret` of the same
+name, and the deployment injects that Secret's entries into the container as
+environment variables. The relay proxy reads `AUTHORIZEDKEYS_EVALUATION` and
+`AUTHORIZEDKEYS_ADMIN` as comma-separated lists and overlays them onto
+`authorizedKeys.evaluation` / `authorizedKeys.admin`, which is why the config
+ConfigMap needs no change at all:
+
+```
+Vault  ──▶  VaultSecret  ──▶  Secret  ──▶  AUTHORIZEDKEYS_EVALUATION  ──▶  authorizedKeys.evaluation
+           (this chart)      (operator)         (env var)                      (relay proxy config)
+```
+
+### Example
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    path: kv/goff/relay-proxy
+```
+
+This renders a `VaultSecret` named `<release>-relay-proxy-api-key` and injects
+the Secret's `evaluation-api-key` entry as `AUTHORIZEDKEYS_EVALUATION`.
+
+### Using a different Vault CRD
+
+`apiKeyAuth.vaultSecret.apiVersion` / `.kind` and the free-form
+`apiKeyAuth.vaultSecret.extraSpec` make the resource portable across operators.
+For the HashiCorp Vault Secrets Operator:
+
+```yaml
+apiKeyAuth:
+  enabled: true
+  vaultSecret:
+    apiVersion: secrets.hashicorp.com/v1beta1
+    kind: VaultStaticSecret
+    path: goff/relay-proxy
+    extraSpec:
+      mount: kv
+      type: kv-v2
+      vaultAuthRef: default
+      refreshAfter: 60s
+```
+
+### Bringing your own Secret
+
+Set `apiKeyAuth.vaultSecret.create=false` and point
+`apiKeyAuth.vaultSecret.name` at an existing Secret to consume a key that
+something else already manages. Either way the Secret must exist by the time the
+pod starts, otherwise the pod sits in `CreateContainerConfigError`.
+
+### Admin keys
+
+`apiKeyAuth.adminSecretKey` is empty by default, so no admin key is injected.
+Set it to a key of the same Secret to also protect the `/v1/admin` endpoints.
+
 **Homepage:** <https://gofeatureflag.org>
 
 ## Maintainers
@@ -108,6 +173,293 @@ object
 			</td>
 			<td>
 				Affinity settings for pod assignment to nodes
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth">
+				<a href="./values.yaml#L170">apiKeyAuth</a>
+            </td>
+			<td>
+object
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+{
+  "adminEnvVar": "AUTHORIZEDKEYS_ADMIN",
+  "adminSecretKey": "",
+  "enabled": false,
+  "evaluationEnvVar": "AUTHORIZEDKEYS_EVALUATION",
+  "evaluationSecretKey": "evaluation-api-key",
+  "vaultSecret": {
+    "annotations": {},
+    "apiVersion": "ricoberger.de/v1alpha1",
+    "create": true,
+    "extraSpec": {},
+    "keys": [],
+    "kind": "VaultSecret",
+    "name": "",
+    "path": "kv/goff/relay-proxy",
+    "secretType": "Opaque"
+  }
+}
+</pre>
+</div>
+			</td>
+			<td>
+				API key authentication for the relay proxy. The keys themselves never live in the chart or in git: a VaultSecret resource materialises a Kubernetes Secret, and the deployment injects that Secret's entries as environment variables. The relay proxy maps `AUTHORIZEDKEYS_EVALUATION` and `AUTHORIZEDKEYS_ADMIN` (comma-separated) onto `authorizedKeys.evaluation` and `authorizedKeys.admin`, so `relayproxy.config` needs no change.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--adminEnvVar">
+				<a href="./values.yaml#L184">apiKeyAuth.adminEnvVar</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"AUTHORIZEDKEYS_ADMIN"
+</pre>
+</div>
+			</td>
+			<td>
+				Environment variable receiving the admin API keys
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--adminSecretKey">
+				<a href="./values.yaml#L180">apiKeyAuth.adminSecretKey</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+""
+</pre>
+</div>
+			</td>
+			<td>
+				Key inside the Secret holding the admin API keys (used by the `/v1/admin` endpoints). Set to "" to not inject an admin key.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--enabled">
+				<a href="./values.yaml#L174">apiKeyAuth.enabled</a>
+            </td>
+			<td>
+bool
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+false
+</pre>
+</div>
+			</td>
+			<td>
+				Enable API key authentication. Callers must then send an `Authorization: Bearer &lt;key&gt;` header on the evaluation endpoints; `/health`, `/info` and `/metrics` stay unauthenticated.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--evaluationEnvVar">
+				<a href="./values.yaml#L182">apiKeyAuth.evaluationEnvVar</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"AUTHORIZEDKEYS_EVALUATION"
+</pre>
+</div>
+			</td>
+			<td>
+				Environment variable receiving the evaluation API keys
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--evaluationSecretKey">
+				<a href="./values.yaml#L177">apiKeyAuth.evaluationSecretKey</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"evaluation-api-key"
+</pre>
+</div>
+			</td>
+			<td>
+				Key inside the Secret holding the evaluation API keys (comma-separated for several). Set to "" to not inject an evaluation key.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--annotations">
+				<a href="./values.yaml#L198">apiKeyAuth.vaultSecret.annotations</a>
+            </td>
+			<td>
+object
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+{}
+</pre>
+</div>
+			</td>
+			<td>
+				Annotations to add to the VaultSecret (accepts template)
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--apiVersion">
+				<a href="./values.yaml#L191">apiKeyAuth.vaultSecret.apiVersion</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"ricoberger.de/v1alpha1"
+</pre>
+</div>
+			</td>
+			<td>
+				apiVersion of the VaultSecret custom resource, so the chart works with whichever Vault secret CRD the cluster provides
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--create">
+				<a href="./values.yaml#L188">apiKeyAuth.vaultSecret.create</a>
+            </td>
+			<td>
+bool
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+true
+</pre>
+</div>
+			</td>
+			<td>
+				Create the VaultSecret resource. Set to false to consume a Secret that already exists (or is produced by something else) under `name` below.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--extraSpec">
+				<a href="./values.yaml#L208">apiKeyAuth.vaultSecret.extraSpec</a>
+            </td>
+			<td>
+object
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+{}
+</pre>
+</div>
+			</td>
+			<td>
+				Extra fields merged into the VaultSecret `spec`, for CRD-specific settings such as `vaultAuthRef`, `mount` or `refreshAfter` (accepts template)
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--keys">
+				<a href="./values.yaml#L204">apiKeyAuth.vaultSecret.keys</a>
+            </td>
+			<td>
+list
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+[]
+</pre>
+</div>
+			</td>
+			<td>
+				Restrict which Vault keys are copied into the Secret; empty copies all
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--kind">
+				<a href="./values.yaml#L193">apiKeyAuth.vaultSecret.kind</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"VaultSecret"
+</pre>
+</div>
+			</td>
+			<td>
+				kind of the custom resource
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--name">
+				<a href="./values.yaml#L196">apiKeyAuth.vaultSecret.name</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+""
+</pre>
+</div>
+			</td>
+			<td>
+				Name of the VaultSecret and of the Secret it produces (accepts template). Defaults to `&lt;fullname&gt;-api-key`.
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--path">
+				<a href="./values.yaml#L200">apiKeyAuth.vaultSecret.path</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"kv/goff/relay-proxy"
+</pre>
+</div>
+			</td>
+			<td>
+				Path in Vault holding the API keys
+			</td>
+		</tr>
+		<tr>
+			<td id="apiKeyAuth--vaultSecret--secretType">
+				<a href="./values.yaml#L202">apiKeyAuth.vaultSecret.secretType</a>
+            </td>
+			<td>
+string
+</td>
+			<td>
+				<div style="max-width: 300px;">
+<pre lang="json">
+"Opaque"
+</pre>
+</div>
+			</td>
+			<td>
+				Type of the Kubernetes Secret produced from the Vault path
 			</td>
 		</tr>
 		<tr>

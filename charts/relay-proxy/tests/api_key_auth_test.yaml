@@ -1,0 +1,161 @@
+suite: test API key authentication
+templates:
+  - deployment.yaml
+  - vaultsecret.yaml
+  # deployment.yaml's checksum/configmap annotation includes this template, so
+  # it has to be part of the suite even though nothing here asserts on it.
+  - configmap.yaml
+tests:
+  - it: should not render the VaultSecret by default
+    template: vaultsecret.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not inject any API key env var by default
+    template: deployment.yaml
+    asserts:
+      # The chart always emits the `env:` key (empty when .Values.env is), so
+      # this is "no entries", not "no field".
+      - isEmpty:
+          path: spec.template.spec.containers[0].env
+
+  - it: should render the VaultSecret when enabled
+    template: vaultsecret.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isAPIVersion:
+          of: ricoberger.de/v1alpha1
+      - isKind:
+          of: VaultSecret
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-relay-proxy-api-key
+      - equal:
+          path: spec.path
+          value: kv/goff/relay-proxy
+      - equal:
+          path: spec.type
+          value: Opaque
+
+  - it: should support another Vault CRD flavour
+    template: vaultsecret.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+        vaultSecret:
+          apiVersion: secrets.hashicorp.com/v1beta1
+          kind: VaultStaticSecret
+          path: goff/relay-proxy
+          extraSpec:
+            mount: kv
+            vaultAuthRef: default
+            refreshAfter: 60s
+    asserts:
+      - isAPIVersion:
+          of: secrets.hashicorp.com/v1beta1
+      - isKind:
+          of: VaultStaticSecret
+      - equal:
+          path: spec.mount
+          value: kv
+      - equal:
+          path: spec.vaultAuthRef
+          value: default
+      - equal:
+          path: spec.refreshAfter
+          value: 60s
+
+  - it: should inject the evaluation key from the VaultSecret's Secret
+    template: deployment.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTHORIZEDKEYS_EVALUATION
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-relay-proxy-api-key
+                key: evaluation-api-key
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 1
+
+  - it: should inject the admin key as well when configured
+    template: deployment.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+        adminSecretKey: admin-api-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTHORIZEDKEYS_ADMIN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-relay-proxy-api-key
+                key: admin-api-key
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 2
+
+  - it: should keep user-provided env vars alongside the API key
+    template: deployment.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+      env:
+        RETRIEVER_NAMESPACE:
+          value: demo
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 2
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RETRIEVER_NAMESPACE
+            value: demo
+
+  - it: should point at an externally managed Secret when create is false
+    templates:
+      - deployment.yaml
+      - vaultsecret.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+        vaultSecret:
+          create: false
+          name: my-existing-api-key
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: vaultsecret.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTHORIZEDKEYS_EVALUATION
+            valueFrom:
+              secretKeyRef:
+                name: my-existing-api-key
+                key: evaluation-api-key
+        template: deployment.yaml
+
+  - it: should fail when enabled without any secret key
+    template: deployment.yaml
+    set:
+      apiKeyAuth:
+        enabled: true
+        evaluationSecretKey: ""
+        adminSecretKey: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "apiKeyAuth.enabled is true but neither apiKeyAuth.evaluationSecretKey nor apiKeyAuth.adminSecretKey is set: the relay proxy would come up with no authorized key and reject every call."

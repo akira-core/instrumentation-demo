@@ -65,6 +65,49 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Name of the Secret holding the relay proxy API keys. This is both the name of
+the VaultSecret resource and the name of the Secret it materialises — the Vault
+secret operators all name the generated Secret after the custom resource.
+*/}}
+{{- define "relay-proxy.apiKeySecretName" -}}
+{{- if .Values.apiKeyAuth.vaultSecret.name }}
+{{- tpl .Values.apiKeyAuth.vaultSecret.name . | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-api-key" (include "relay-proxy.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Environment variables injecting the API keys from the Secret above. The relay
+proxy reads AUTHORIZEDKEYS_EVALUATION / AUTHORIZEDKEYS_ADMIN as comma-separated
+lists and overlays them onto authorizedKeys.{evaluation,admin} in its config, so
+the keys never have to be rendered into the ConfigMap.
+Renders nothing when apiKeyAuth.enabled is false.
+*/}}
+{{- define "relay-proxy.apiKeyEnv" -}}
+{{- if .Values.apiKeyAuth.enabled }}
+{{- if not (or .Values.apiKeyAuth.evaluationSecretKey .Values.apiKeyAuth.adminSecretKey) }}
+{{- fail "apiKeyAuth.enabled is true but neither apiKeyAuth.evaluationSecretKey nor apiKeyAuth.adminSecretKey is set: the relay proxy would come up with no authorized key and reject every call." }}
+{{- end }}
+{{- $secretName := include "relay-proxy.apiKeySecretName" . }}
+{{- with .Values.apiKeyAuth.evaluationSecretKey }}
+- name: {{ $.Values.apiKeyAuth.evaluationEnvVar }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: {{ . }}
+{{- end }}
+{{- with .Values.apiKeyAuth.adminSecretKey }}
+- name: {{ $.Values.apiKeyAuth.adminEnvVar }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Renders a value that contains template
 Usage:
 {{ include "common.tplvalues.render" ( dict "value" .Values.path.to.the.Value "context" $ ) }}
