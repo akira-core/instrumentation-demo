@@ -12,6 +12,9 @@
 //   - ReplySubject ("demo.trace.reply"): a CONSUMER span per message that
 //     resolves the correlation ID back to the goroutine blocked in
 //     RunRoundTrip.
+//
+// A completed round trip is therefore SEVERAL traces, not one: each consumer
+// span is a root joined to its producer by a span link. See handleRequest.
 package natsflow
 
 import (
@@ -174,8 +177,17 @@ func (m *Manager) subscribe(conn *otelnats.Conn) error {
 }
 
 // handleRequest is the CONSUMER-side handler for RequestSubject: trivial
-// simulated work, then a reply publish carrying the extracted trace context
-// forward so the whole round trip stays on one trace.
+// simulated work, then a reply publish that continues the CONSUMER span's
+// context.
+//
+// That context is a NEW trace, not the caller's. otelnats starts a consumer
+// span as a root and attaches the producer as an OTel span LINK rather than as
+// a parent, so a completed demo run produces several trace IDs by design and
+// the reply publish lands on the consumer's trace, linked back to the request
+// rather than nested under it. README.md, "Important: NATS spans use span links
+// (multiple trace IDs)", is the long version; docs/evidence/live-summary.json
+// shows it happening (nats_count=1 on the request's trace, the other three NATS
+// spans under their own).
 func (m *Manager) handleRequest(msg otelnats.Msg) {
 	ctx := msg.Context()
 	corrID := msg.Msg.Header.Get(correlationHeader)

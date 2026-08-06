@@ -1,9 +1,27 @@
 {
+  "by_category": {
+    "dynamic": {
+      "passed": 3,
+      "total": 3
+    },
+    "invalid": {
+      "passed": 5,
+      "total": 5
+    },
+    "local": {
+      "passed": 10,
+      "total": 10
+    },
+    "relay": {
+      "passed": 11,
+      "total": 11
+    }
+  },
   "failed": 0,
-  "generated_at": "2026-08-05T13:57:57Z",
+  "generated_at": "2026-08-06T00:51:33Z",
   "ladder": "relay \u003e env \u003e option \u003e default; tracing = master \u0026\u0026 module",
   "library": "otel-nats + otel-flags (workspace submodule)",
-  "passed": 22,
+  "passed": 29,
   "results": [
     {
       "case": {
@@ -18,6 +36,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -31,13 +51,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.289941Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T00:51:33.679721345Z",
+      "duration_ms": 2
     },
     {
       "case": {
@@ -51,6 +73,8 @@
         ],
         "master_env": "true",
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -64,13 +88,15 @@
       "evidence": [
         "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"true\"",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.291464Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.682740692Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -83,6 +109,8 @@
         ],
         "master_env": null,
         "module_env": "true",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -96,13 +124,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"true\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.29215Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.684054339Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -115,6 +145,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": null,
         "relay_module": null,
@@ -128,12 +160,14 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.292778Z",
+      "ran_at": "2026-08-06T00:51:33.685484663Z",
       "duration_ms": 0
     },
     {
@@ -147,6 +181,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": false,
         "relay_master": null,
         "relay_module": null,
@@ -160,12 +196,14 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option WithTracingEnabled(false)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.29343Z",
+      "ran_at": "2026-08-06T00:51:33.686481522Z",
       "duration_ms": 0
     },
     {
@@ -179,6 +217,8 @@
         ],
         "master_env": null,
         "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": null,
         "relay_module": null,
@@ -192,12 +232,14 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.293918Z",
+      "ran_at": "2026-08-06T00:51:33.68735565Z",
       "duration_ms": 0
     },
     {
@@ -211,6 +253,8 @@
         ],
         "master_env": null,
         "module_env": "true",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": false,
         "relay_master": null,
         "relay_module": null,
@@ -224,12 +268,14 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"true\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option WithTracingEnabled(false)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.294358Z",
+      "ran_at": "2026-08-06T00:51:33.688178246Z",
       "duration_ms": 0
     },
     {
@@ -244,6 +290,8 @@
         ],
         "master_env": "false",
         "module_env": "true",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": null,
         "relay_module": null,
@@ -257,13 +305,15 @@
       "evidence": [
         "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"false\"",
         "SET OTEL_NATS_TRACING_ENABLED=\"true\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.294742Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.689089568Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -275,6 +325,8 @@
         ],
         "master_env": null,
         "module_env": "1",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -288,13 +340,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"1\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.295155Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.690369348Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -306,6 +360,8 @@
         ],
         "master_env": null,
         "module_env": "off",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -319,13 +375,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"off\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.296136Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.691870948Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -337,13 +395,15 @@
         ],
         "master_env": null,
         "module_env": "",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
         "relay_mode": "none",
         "expect_on": false,
         "expect_error": true,
-        "expect_err_is": "otel-flags: invalid configuration value"
+        "expect_err_is": "otelflags.ErrInvalidFlagValue"
       },
       "pass": true,
       "got_error": "otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=\"\" (accepted: 1,true,yes,on / 0,false,no,off)",
@@ -351,12 +411,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=\"\" (accepted: 1,true,yes,on / 0,false,no,off)",
-        "expect_error=true → pass=true"
+        "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
+        "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.29646Z",
+      "ran_at": "2026-08-06T00:51:33.693250087Z",
       "duration_ms": 0
     },
     {
@@ -369,13 +432,15 @@
         ],
         "master_env": null,
         "module_env": "enabled",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
         "relay_mode": "none",
         "expect_on": false,
         "expect_error": true,
-        "expect_err_is": "otel-flags: invalid configuration value"
+        "expect_err_is": "otelflags.ErrInvalidFlagValue"
       },
       "pass": true,
       "got_error": "otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=\"enabled\" (accepted: 1,true,yes,on / 0,false,no,off)",
@@ -383,12 +448,130 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"enabled\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_NATS_TRACING_ENABLED=\"enabled\" (accepted: 1,true,yes,on / 0,false,no,off)",
-        "expect_error=true → pass=true"
+        "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
+        "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.296485Z",
+      "ran_at": "2026-08-06T00:51:33.693425747Z",
+      "duration_ms": 0
+    },
+    {
+      "case": {
+        "id": "E03",
+        "title_zh": "master env 無法辨識「yes-please」→ 建構錯誤",
+        "category": "invalid",
+        "config_steps": [
+          "OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=yes-please",
+          "master 也是嚴格三態，不會猜方向"
+        ],
+        "master_env": "yes-please",
+        "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": null,
+        "relay_mode": "none",
+        "expect_on": false,
+        "expect_error": true,
+        "expect_err_is": "otelflags.ErrInvalidFlagValue"
+      },
+      "pass": true,
+      "got_error": "otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"yes-please\" (accepted: 1,true,yes,on / 0,false,no,off)",
+      "connect_ok": false,
+      "evidence": [
+        "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"yes-please\"",
+        "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
+        "option: (none)",
+        "ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"yes-please\" (accepted: 1,true,yes,on / 0,false,no,off)",
+        "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.693569929Z",
+      "duration_ms": 0
+    },
+    {
+      "case": {
+        "id": "V01",
+        "title_zh": "_ENDPOINT 缺 scheme/host（relay:1031）→ 建構錯誤",
+        "category": "invalid",
+        "config_steps": [
+          "OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=relay:1031",
+          "「relay:1031」能被 url.Parse 接受（scheme=relay、opaque=1031），但永遠連不到任何東西",
+          "所以 ValidateAndInstall 同時檢查 scheme 與 host"
+        ],
+        "master_env": null,
+        "module_env": null,
+        "endpoint_env": "relay:1031",
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": null,
+        "relay_mode": "none",
+        "expect_on": false,
+        "expect_error": true,
+        "expect_err_is": "otelflags.ErrInvalidFlagValue"
+      },
+      "pass": true,
+      "got_error": "otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"relay:1031\" needs a scheme and a host (want e.g. http://relay:1031)",
+      "connect_ok": false,
+      "evidence": [
+        "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
+        "UNSET OTEL_NATS_TRACING_ENABLED",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"relay:1031\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
+        "option: (none)",
+        "ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"relay:1031\" needs a scheme and a host (want e.g. http://relay:1031)",
+        "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.693715539Z",
+      "duration_ms": 0
+    },
+    {
+      "case": {
+        "id": "V02",
+        "title_zh": "_POLL_INTERVAL 是裸整數（60）→ 建構錯誤",
+        "category": "invalid",
+        "config_steps": [
+          "OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=60",
+          "只接受 Go duration 字串（60s / 2m），裸整數會被拒絕而不是當成秒"
+        ],
+        "master_env": null,
+        "module_env": null,
+        "endpoint_env": null,
+        "poll_env": "60",
+        "option": null,
+        "relay_master": null,
+        "relay_module": null,
+        "relay_mode": "none",
+        "expect_on": false,
+        "expect_error": true,
+        "expect_err_is": "otelflags.ErrInvalidFlagValue"
+      },
+      "pass": true,
+      "got_error": "otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"60\" is not a Go duration (want e.g. 30s or 2m; a bare integer is rejected)",
+      "connect_ok": false,
+      "evidence": [
+        "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
+        "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"60\"",
+        "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
+        "option: (none)",
+        "ConnectWithOptions error: otel-flags: invalid configuration value: OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"60\" is not a Go duration (want e.g. 30s or 2m; a bare integer is rejected)",
+        "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.693859677Z",
       "duration_ms": 0
     },
     {
@@ -403,6 +586,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": true,
@@ -416,14 +601,16 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=true",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option: (none)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.296507Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.69400117Z",
+      "duration_ms": 4
     },
     {
       "case": {
@@ -436,6 +623,8 @@
         ],
         "master_env": null,
         "module_env": "true",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": false,
@@ -449,13 +638,15 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"true\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=false",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.296853Z",
+      "ran_at": "2026-08-06T00:51:33.698228728Z",
       "duration_ms": 0
     },
     {
@@ -470,6 +661,8 @@
         ],
         "master_env": "1",
         "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": true,
@@ -483,13 +676,15 @@
       "evidence": [
         "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"1\"",
         "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=true",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option: (none)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.29712Z",
+      "ran_at": "2026-08-06T00:51:33.699302047Z",
       "duration_ms": 0
     },
     {
@@ -503,6 +698,8 @@
         ],
         "master_env": null,
         "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": false,
@@ -516,14 +713,16 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=false",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.297507Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.700263423Z",
+      "duration_ms": 8
     },
     {
       "case": {
@@ -537,6 +736,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": false,
         "relay_module": true,
@@ -550,15 +751,17 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-instrumentation-go-tracing=false",
         "relay otel-nats-tracing=true",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.297906Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.708573623Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -571,6 +774,8 @@
         ],
         "master_env": "false",
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": true,
@@ -584,14 +789,16 @@
       "evidence": [
         "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"false\"",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=true",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option: (none)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.298375Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.709989256Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -604,6 +811,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": null,
         "relay_module": false,
@@ -617,14 +826,16 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=false",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.298759Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.711627029Z",
+      "duration_ms": 8
     },
     {
       "case": {
@@ -637,6 +848,8 @@
         ],
         "master_env": null,
         "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
         "option": false,
         "relay_master": null,
         "relay_module": true,
@@ -650,14 +863,16 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "relay otel-nats-tracing=true",
-        "OpenFeature FlagDomain → InMemoryProvider installed BEFORE Connect",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
         "option WithTracingEnabled(false)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.299139Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T00:51:33.720155744Z",
+      "duration_ms": 1
     },
     {
       "case": {
@@ -671,6 +886,8 @@
         ],
         "master_env": null,
         "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": true,
         "relay_master": null,
         "relay_module": null,
@@ -684,12 +901,14 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → empty InMemoryProvider (keys absent)",
         "option WithTracingEnabled(true)",
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.299524Z",
+      "ran_at": "2026-08-06T00:51:33.721585493Z",
       "duration_ms": 0
     },
     {
@@ -703,6 +922,8 @@
         ],
         "master_env": null,
         "module_env": "1",
+        "endpoint_env": null,
+        "poll_env": null,
         "option": null,
         "relay_master": null,
         "relay_module": null,
@@ -716,14 +937,223 @@
       "evidence": [
         "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
         "SET OTEL_NATS_TRACING_ENABLED=\"1\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
         "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
         "option: (none)",
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-05T13:57:57.299932Z",
+      "ran_at": "2026-08-06T00:51:33.722612733Z",
       "duration_ms": 0
+    },
+    {
+      "case": {
+        "id": "R11",
+        "title_zh": "只裝 default slot 的 provider 不算 relay → 關閉",
+        "category": "relay",
+        "config_steps": [
+          "openfeature.SetProviderAndWait(DEFAULT slot) 且 otel-nats-tracing=true",
+          "FlagDomain 本身不綁（NoopProvider）",
+          "清除所有 env",
+          "預期：模組預設 false 勝出 — 應用自己的商業 provider 不該被當成 instrumentation 的 relay"
+        ],
+        "master_env": null,
+        "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": true,
+        "relay_mode": "default-slot",
+        "expect_on": false,
+        "expect_error": false
+      },
+      "pass": true,
+      "got_on": false,
+      "connect_ok": true,
+      "evidence": [
+        "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
+        "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "openfeature.SetProviderAndWait(DEFAULT slot) 綁了含 otel-nats-tracing 的 provider",
+        "FlagDomain 本身仍是 NoopProvider",
+        "option: (none)",
+        "conn.TracingEnabled() = false (expect false)",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.723699051Z",
+      "duration_ms": 0
+    },
+    {
+      "case": {
+        "id": "D01",
+        "title_zh": "連線後翻 relay：on → off → on（不重連）",
+        "category": "dynamic",
+        "config_steps": [
+          "OTEL_NATS_TRACING_ENABLED=false（option C 姿勢）",
+          "relay otel-nats-tracing=true，先裝 provider 再 Connect",
+          "連線建立後直接改綁 provider，不呼叫 Connect、不關連線",
+          "每次改綁後重新讀 conn.TracingEnabled()"
+        ],
+        "master_env": "1",
+        "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": true,
+        "relay_mode": "named-domain",
+        "flips": [
+          {
+            "title_zh": "relay 改為 false → 同一條連線應立刻關閉",
+            "relay_module": false,
+            "relay_master": null,
+            "expect_on": false
+          },
+          {
+            "title_zh": "relay 改回 true → 同一條連線應立刻恢復",
+            "relay_module": true,
+            "relay_master": null,
+            "expect_on": true
+          }
+        ],
+        "expect_on": true,
+        "expect_error": false
+      },
+      "pass": true,
+      "got_on": true,
+      "connect_ok": true,
+      "evidence": [
+        "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"1\"",
+        "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "option: (none)",
+        "conn.TracingEnabled() = true (expect true)",
+        "relay otel-nats-tracing=false",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "flip[0] relay 改為 false → 同一條連線應立刻關閉 → conn.TracingEnabled() = false (expect false)",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "flip[1] relay 改回 true → 同一條連線應立刻恢復 → conn.TracingEnabled() = true (expect true)",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.724524164Z",
+      "duration_ms": 18
+    },
+    {
+      "case": {
+        "id": "D02",
+        "title_zh": "連線後 relay master 否決 → 關閉（module key 不變）",
+        "category": "dynamic",
+        "config_steps": [
+          "relay otel-nats-tracing=true，Connect 後為開啟",
+          "改綁 provider：加上 otel-instrumentation-go-tracing=false，module key 維持 true",
+          "預期：master 否決在 module key 之上，短路掉模組自己的 key"
+        ],
+        "master_env": null,
+        "module_env": "false",
+        "endpoint_env": null,
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": true,
+        "relay_mode": "named-domain",
+        "flips": [
+          {
+            "title_zh": "relay 加上 master=false → 關閉",
+            "relay_module": true,
+            "relay_master": false,
+            "expect_on": false
+          },
+          {
+            "title_zh": "relay 拿掉 master 否決 → 恢復",
+            "relay_module": true,
+            "relay_master": true,
+            "expect_on": true
+          }
+        ],
+        "expect_on": true,
+        "expect_error": false
+      },
+      "pass": true,
+      "got_on": true,
+      "connect_ok": true,
+      "evidence": [
+        "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
+        "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "option: (none)",
+        "conn.TracingEnabled() = true (expect true)",
+        "relay otel-instrumentation-go-tracing=false",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "flip[0] relay 加上 master=false → 關閉 → conn.TracingEnabled() = false (expect false)",
+        "relay otel-instrumentation-go-tracing=true",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "flip[1] relay 拿掉 master 否決 → 恢復 → conn.TracingEnabled() = true (expect true)",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.743074442Z",
+      "duration_ms": 4
+    },
+    {
+      "case": {
+        "id": "D03",
+        "title_zh": "無 relay 的連線不受後來綁上的 provider 影響（建構時已定案）",
+        "category": "dynamic",
+        "config_steps": [
+          "FlagDomain 綁 NoopProvider、env 全清 → RelayPossible=false",
+          "Connect（此時 traced 實作根本沒被建立）",
+          "連線之後才綁上 otel-nats-tracing=true 的 provider",
+          "預期：仍為關閉 — RelayPossible 在建構時解析，這是文件寫明的順序要求"
+        ],
+        "master_env": null,
+        "module_env": null,
+        "endpoint_env": null,
+        "poll_env": null,
+        "option": null,
+        "relay_master": null,
+        "relay_module": null,
+        "relay_mode": "none",
+        "flips": [
+          {
+            "title_zh": "事後才綁 provider（otel-nats-tracing=true）→ 仍關閉",
+            "relay_module": true,
+            "relay_master": null,
+            "expect_on": false
+          }
+        ],
+        "expect_on": false,
+        "expect_error": false
+      },
+      "pass": true,
+      "got_on": false,
+      "connect_ok": true,
+      "evidence": [
+        "UNSET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED",
+        "UNSET OTEL_NATS_TRACING_ENABLED",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT",
+        "UNSET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL",
+        "OpenFeature FlagDomain → NoopProvider (no relay opinion)",
+        "option: (none)",
+        "conn.TracingEnabled() = false (expect false)",
+        "relay otel-nats-tracing=true",
+        "OpenFeature FlagDomain → InMemoryProvider installed",
+        "flip[0] 事後才綁 provider（otel-nats-tracing=true）→ 仍關閉 → conn.TracingEnabled() = false (expect false)",
+        "RESULT: PASS"
+      ],
+      "ran_at": "2026-08-06T00:51:33.747782347Z",
+      "duration_ms": 1
     }
   ],
-  "total": 22
+  "total": 29
 }

@@ -47,11 +47,27 @@ def main() -> None:
             cfg_lines.append(f"WithTracingEnabled({c['option']})")
         else:
             cfg_lines.append("WithTracingEnabled=(none)")
+        for name, key in (("OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT", "endpoint_env"),
+                          ("OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL", "poll_env")):
+            if c.get(key) is not None:
+                cfg_lines.append(f"{name}={c[key]!r}")
+            else:
+                cfg_lines.append(f"{name}=(unset)")
         cfg_lines.append(f"relay_mode={c['relay_mode']}")
         if c.get("relay_master") is not None:
             cfg_lines.append(f"relay otel-instrumentation-go-tracing={c['relay_master']}")
         if c.get("relay_module") is not None:
             cfg_lines.append(f"relay otel-nats-tracing={c['relay_module']}")
+        for i, f in enumerate(c.get("flips") or []):
+            bits = []
+            if f.get("relay_master") is not None:
+                bits.append(f"master={f['relay_master']}")
+            if f.get("relay_module") is not None:
+                bits.append(f"module={f['relay_module']}")
+            cfg_lines.append(
+                f"flip[{i}] (連線建立之後改綁 provider，不重連): "
+                f"{', '.join(bits)} → 預期 {'ON' if f['expect_on'] else 'OFF'}"
+            )
 
         if c.get("expect_error"):
             expect = "建構錯誤 (ErrInvalidFlagValue)"
@@ -91,25 +107,49 @@ def main() -> None:
 """
         )
 
+    # The live evidence and the script that captures it can fall out of step: a
+    # rewritten capture procedure does not retroactively change a summary that
+    # was captured months earlier. `attempts` only exists in output from the
+    # poll-to-convergence version, so its absence dates the artifact — and the
+    # report says so rather than describing a procedure that did not produce the
+    # numbers underneath it.
+    stale_live = any("attempts" not in c for c in live["cases"])
+    stale_live_banner = (
+        '<div class="callout warn"><strong>叢集證據早於腳本改版</strong><br/>'
+        '下方 live 案例是舊版 <code>capture-live-evidence.sh</code>（固定 sleep 75 秒、'
+        '以 grep 解析 ClickHouse 表格輸出、無全叢集時間窗查詢）產生的，'
+        '缺少 <code>attempts</code> 與 <code>nats_spans_cluster_wide_last_2min</code> 欄位。'
+        '「① 設定步驟」描述的是<strong>現在</strong>腳本的做法。'
+        '要讓兩者一致，需對 <code>demo</code> namespace 重跑 '
+        '<code>./docs/scripts/capture-live-evidence.sh</code>。</div>'
+        if stale_live else ""
+    )
+
     live_sections: list[str] = []
     for c in live["cases"]:
-        steps = """1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」）
+        steps = """1. backend Deployment 維持 option C 環境變數（見「叢集基準設定」），全程不重啟
 2. kubectl apply ConfigMap demo-feature-flags（本案例的 defaultRule.variation）
-3. 等待約 75 秒（kubelet ConfigMap mount 刷新 + GOFF poll 1s + provider poll 2s）
-4. POST GOFF /v1/feature/otel-nats-tracing/eval 確認 relay 值
-5. POST /api/demo-trace 取得 traceId
-6. ClickHouse 查詢 otel.otel_traces WHERE TraceId = <traceId>"""
+3. 輪詢 GOFF /v1/feature/otel-nats-tracing/eval 直到 relay 真的服務新的 variation
+   （不是固定 sleep — kubelet mount 刷新時間不固定）
+4. 輪詢後端：POST /api/demo-trace → 等 span 落地 → 查 ClickHouse，
+   直到結果符合預期或用盡重試（attempts 欄位記錄實際用了幾次）
+5. ClickHouse 查詢 otel.otel_traces WHERE TraceId = <traceId>（TabSeparated 取純數字）
+6. 停用案例額外查全叢集最近 2 分鐘的 demo.trace span 數，
+   用來區分「tracing 被關掉」與「propagation 壞掉、span 落在別條 trace」"""
         live_sections.append(
             f"""
     <article class="case" id="live-{esc(c['id'])}">
       <header>
         <h3><code>{esc(c['id'])}</code> {esc(c['title'])} {badge(c['pass'])}</h3>
-        <p class="meta">traceId=<code>{esc(c.get('traceId'))}</code> · nats={esc(c.get('nats_count'))} · http={esc(c.get('http_count'))}</p>
+        <p class="meta">traceId=<code>{esc(c.get('traceId'))}</code> · nats={esc(c.get('nats_count'))} · http={esc(c.get('http_count'))}
+        · 全叢集近 2 分鐘 NATS span={esc(c.get('nats_spans_cluster_wide_last_2min', 'n/a'))}
+        · 收斂用了 {esc(c.get('attempts', 'n/a'))} 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
       {pre(steps)}
       <h4>② Relay eval API 回應</h4>
       {pre(json.dumps(c.get('relay_eval'), ensure_ascii=False, indent=2))}
+      {f'<p class="meta">{esc(c["relay_eval_note"])}</p>' if c.get("relay_eval_note") else ''}
       <h4>③ Demo API 回應</h4>
       {pre(json.dumps(c.get('api'), ensure_ascii=False, indent=2))}
       <h4>④ ClickHouse 查詢結果</h4>
@@ -184,8 +224,9 @@ OpenFeature domain：otel-instrumentation-go
 cd backend && go test ./internal/flagmatrix/ -v -count=1
 
 # 2) 叢集 live 證據（需 demo namespace）
-# 逐步：apply ConfigMap → wait 75s → curl relay eval → curl demo-trace → clickhouse
-# 或：
+# 逐步：apply ConfigMap → 輪詢 relay eval 直到新 variation 生效
+#      → 輪詢 demo-trace + ClickHouse 直到結果收斂（或用盡重試）
+# 這支腳本就是產生 docs/evidence/live-summary.json 的那一支：
 ./docs/scripts/capture-live-evidence.sh
 
 # 3) 重產本 HTML
@@ -258,6 +299,8 @@ open docs/otel-nats-feature-flag-matrix.zh-TW.html"""
     <ul>{toc_for("invalid")}</ul>
     <h4>單元 · relay</h4>
     <ul>{toc_for("relay")}</ul>
+    <h4>單元 · dynamic</h4>
+    <ul>{toc_for("dynamic")}</ul>
     <h4>叢集 live</h4>
     <ul>{toc_live}</ul>
     <h4>重跑</h4>
@@ -311,6 +354,7 @@ open docs/otel-nats-feature-flag-matrix.zh-TW.html"""
     {''.join(unit_sections)}
 
     <h2 id="live">叢集實測詳情</h2>
+    {stale_live_banner}
     {''.join(live_sections)}
 
     <h2 id="repro">如何重跑證據</h2>
