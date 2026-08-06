@@ -232,6 +232,11 @@ teardown:
 		exit 1; \
 	fi
 
+# `kind-down` reads as the counterpart to `kind-up` and has been in .PHONY since
+# the Makefile was written, but never had a recipe — so `make kind-down` printed
+# "Nothing to be done" and deleted nothing, while looking like it had worked.
+kind-down: teardown
+
 # Run a bounded OTLP trace load test against rotel. Not part of `deploy` — load
 # only ever runs when explicitly asked for.
 #
