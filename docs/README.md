@@ -25,6 +25,42 @@
 `RelayPossible` 是建構時解析的，所以事後才綁上的 provider 對既有連線無效
 （這是文件寫明的順序要求）。
 
+## relay targeting by service name（正確性）
+
+- **證據**：[`evidence/targeting-unit.json`](./evidence/targeting-unit.json)
+- **重跑**：`cd backend && go test ./internal/flagtargeting/ -v -count=1`
+
+回答一個上下游都沒測到的問題：**operator 在 relay 上寫一條依服務名選擇的規則，
+到底選不選得到這個 process？**
+
+| 層級 | 檔案 | 實際涵蓋 |
+|---|---|---|
+| 上游 UT | `otel-flags/flags_test.go` | 唯一出現 `OTEL_SERVICE_NAME` 的地方，斷言 `currentEvalCtx().Attributes()["serviceName"]` 帶了值 — 屬性有沒有**送出去** |
+| 上游 e2e | `otel-nats/tests/integration/relayflags_test.go` | 真的 relay proxy container，但 flag fixture 只有 `defaultRule`，整份測試沒有任何 `targeting` |
+
+上游 UT 證明屬性送得出去，e2e 證明 relay 連得到，**沒有人把兩者接起來**。
+
+三個案例，一個 case 一個子行程（`OTEL_SERVICE_NAME` 是在 `installProviderFromEnv`
+裡讀的，而安裝在 process 內是不可逆的 latch）：
+
+| ID | relay 規則 | `OTEL_SERVICE_NAME` | 預期 |
+|---|---|---|---|
+| T01 | `serviceName eq "demo-backend"` | `demo-backend` | ON |
+| T02 | `serviceName eq "demo-backend"` | `other-service` | OFF |
+| T03 | `service.name eq "demo-backend"` | `demo-backend` | OFF |
+
+T01/T02 只差服務名，T01/T03 只差規則寫法，兩軸各自都會改變結果 —— 所以不可能是碰巧全開或全關。
+
+**T03 釘的是一個有文件記載的陷阱。** `otel-flags` 兩種拼法都送（`service.name` 與
+`serviceName`），因為前者是 semconv 讀者預期看到的名字，而**只有後者能被 targeting 用**：
+nikunjy 與 JSONLogic 都把點當成巢狀路徑分隔符，所以 `service.name eq "..."` 會去解一條路徑、
+找不到東西，於是一個 process 都選不到 —— 安靜地、每個 process 都如此，看起來就只是「flag 沒作用」。
+哪天有人把沒有點的拼法拿掉，會在 T03 爆掉，而不是在叢集裡。
+
+規則由 `internal/fakerelay` 供應：行程內的假 relay 回應 GOFF provider 的
+`POST /v1/flag/configuration`，所以查詢是**真的 GO Feature Flag rule 引擎**在解析
+（陷阱就住在那個 parser 裡，in-memory stub 抓不到），但不需要 Docker。
+
 ## otel-nats feature-flag 閘門延遲（效能）
 
 - **報告 HTML**：[`otel-nats-gate-latency.zh-TW.html`](./otel-nats-gate-latency.zh-TW.html)

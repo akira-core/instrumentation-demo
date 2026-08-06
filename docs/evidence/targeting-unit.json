@@ -1,0 +1,94 @@
+{
+  "failed": 0,
+  "generated_at": "2026-08-06T01:47:54Z",
+  "isolation": "一個 case 一個子行程：OTEL_SERVICE_NAME 在 installProviderFromEnv 內被讀取，且安裝在 process 內是不可逆的 latch",
+  "library": "otel-nats + otel-flags (workspace submodule)",
+  "passed": 3,
+  "provider": "otel-flags 自動安裝的 GO Feature Flag in-process provider，設定由行程內的假 relay 供應（真 rule 引擎，不是 in-memory stub）",
+  "results": [
+    {
+      "case": {
+        "id": "T01",
+        "title_zh": "relay 規則 serviceName 命中 → 開啟",
+        "query": "serviceName eq \"demo-backend\"",
+        "service_name": "demo-backend",
+        "expect_on": true,
+        "why_zh": "option C 姿勢下本地是關的，只有 relay 能打開。開啟即證明 OTEL_SERVICE_NAME 真的以 serviceName 進到 evaluation context，而且 relay 規則吃得到它。",
+        "config_steps": [
+          "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1",
+          "SET OTEL_NATS_TRACING_ENABLED=false（本地關閉，只有 relay 能開）",
+          "SET OTEL_SERVICE_NAME=demo-backend",
+          "SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\u003cfake relay\u003e（觸發 auto-install）",
+          "relay otel-nats-tracing: targeting [{query: serviceName eq \"demo-backend\", variation: enabled}], defaultRule: disabled"
+        ]
+      },
+      "pass": true,
+      "got_on": true,
+      "evidence": [
+        "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"1\"",
+        "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "SET OTEL_SERVICE_NAME=\"demo-backend\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"http://127.0.0.1:33181\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"2s\"",
+        "relay otel-nats-tracing: targeting [{query: serviceName eq \"demo-backend\", variation: enabled}], defaultRule: disabled",
+        "provider ready（哨兵旗標 otel-flagtargeting-ready 已由 relay 回覆 true，排除「還沒 fetch 完」）",
+        "conn.TracingEnabled() = true (expect true)",
+        "RESULT: PASS"
+      ]
+    },
+    {
+      "case": {
+        "id": "T02",
+        "title_zh": "同一條規則、服務名不符 → 關閉",
+        "query": "serviceName eq \"demo-backend\"",
+        "service_name": "other-service",
+        "expect_on": false,
+        "why_zh": "與 T01 只差 OTEL_SERVICE_NAME。關閉即證明規則真的在「篩選」，而不是無論如何都套用 enabled — 少了這個對照，T01 也可能只是碰巧全開。",
+        "config_steps": [
+          "同 T01，但 SET OTEL_SERVICE_NAME=other-service"
+        ]
+      },
+      "pass": true,
+      "got_on": false,
+      "evidence": [
+        "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"1\"",
+        "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "SET OTEL_SERVICE_NAME=\"other-service\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"http://127.0.0.1:40471\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"2s\"",
+        "relay otel-nats-tracing: targeting [{query: serviceName eq \"demo-backend\", variation: enabled}], defaultRule: disabled",
+        "provider ready（哨兵旗標 otel-flagtargeting-ready 已由 relay 回覆 true，排除「還沒 fetch 完」）",
+        "conn.TracingEnabled() = false (expect false)",
+        "RESULT: PASS"
+      ]
+    },
+    {
+      "case": {
+        "id": "T03",
+        "title_zh": "規則寫成 service.name（帶點）→ 關閉（已知陷阱）",
+        "query": "service.name eq \"demo-backend\"",
+        "service_name": "demo-backend",
+        "expect_on": false,
+        "why_zh": "服務名相符，規則卻不該命中：nikunjy 與 JSONLogic 都把點當成巢狀路徑分隔符，所以 service.name 會被拆成 attribute「service」的子欄位「name」而找不到東西。otel-flags 兩種拼法都送，就是為了讓 serviceName 這個沒有點的版本可以被 targeting。這個案例把陷阱釘住：哪天有人把沒有點的那個拼法拿掉，會在這裡爆，而不是在叢集裡靜靜地誰都選不到。",
+        "config_steps": [
+          "同 T01，但 relay 規則寫成 service.name eq \"demo-backend\""
+        ]
+      },
+      "pass": true,
+      "got_on": false,
+      "evidence": [
+        "SET OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=\"1\"",
+        "SET OTEL_NATS_TRACING_ENABLED=\"false\"",
+        "SET OTEL_SERVICE_NAME=\"demo-backend\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT=\"http://127.0.0.1:36075\"",
+        "SET OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL=\"2s\"",
+        "relay otel-nats-tracing: targeting [{query: service.name eq \"demo-backend\", variation: enabled}], defaultRule: disabled",
+        "provider ready（哨兵旗標 otel-flagtargeting-ready 已由 relay 回覆 true，排除「還沒 fetch 完」）",
+        "conn.TracingEnabled() = false (expect false)",
+        "RESULT: PASS"
+      ]
+    }
+  ],
+  "subject": "relay targeting by service name — OTEL_SERVICE_NAME 是否真的能被 relay 規則選中，以及 service.name（帶點）為何選不到",
+  "total": 3
+}

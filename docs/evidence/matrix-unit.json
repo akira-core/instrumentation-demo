@@ -18,7 +18,7 @@
     }
   },
   "failed": 0,
-  "generated_at": "2026-08-06T00:51:33Z",
+  "generated_at": "2026-08-06T01:47:41Z",
   "ladder": "relay \u003e env \u003e option \u003e default; tracing = master \u0026\u0026 module",
   "library": "otel-nats + otel-flags (workspace submodule)",
   "passed": 29,
@@ -58,8 +58,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.679721345Z",
-      "duration_ms": 2
+      "ran_at": "2026-08-06T01:47:40.903671507Z",
+      "duration_ms": 31
     },
     {
       "case": {
@@ -95,8 +95,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.682740692Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:40.942431068Z",
+      "duration_ms": 36
     },
     {
       "case": {
@@ -131,8 +131,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.684054339Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:40.979539918Z",
+      "duration_ms": 9
     },
     {
       "case": {
@@ -167,8 +167,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.685484663Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.002233489Z",
+      "duration_ms": 10
     },
     {
       "case": {
@@ -203,8 +203,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.686481522Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.017214518Z",
+      "duration_ms": 17
     },
     {
       "case": {
@@ -239,8 +239,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.68735565Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.037088061Z",
+      "duration_ms": 26
     },
     {
       "case": {
@@ -275,8 +275,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.688178246Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.065142768Z",
+      "duration_ms": 49
     },
     {
       "case": {
@@ -312,8 +312,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.689089568Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.11491494Z",
+      "duration_ms": 27
     },
     {
       "case": {
@@ -347,8 +347,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.690369348Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.143759724Z",
+      "duration_ms": 26
     },
     {
       "case": {
@@ -382,8 +382,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.691870948Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.170857719Z",
+      "duration_ms": 27
     },
     {
       "case": {
@@ -419,7 +419,7 @@
         "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.693250087Z",
+      "ran_at": "2026-08-06T01:47:41.201617927Z",
       "duration_ms": 0
     },
     {
@@ -456,7 +456,7 @@
         "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.693425747Z",
+      "ran_at": "2026-08-06T01:47:41.202502756Z",
       "duration_ms": 0
     },
     {
@@ -494,7 +494,7 @@
         "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.693569929Z",
+      "ran_at": "2026-08-06T01:47:41.203215991Z",
       "duration_ms": 0
     },
     {
@@ -533,7 +533,7 @@
         "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.693715539Z",
+      "ran_at": "2026-08-06T01:47:41.205092245Z",
       "duration_ms": 0
     },
     {
@@ -571,7 +571,7 @@
         "errors.Is(err, otelflags.ErrInvalidFlagValue) = true",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.693859677Z",
+      "ran_at": "2026-08-06T01:47:41.209059622Z",
       "duration_ms": 0
     },
     {
@@ -609,8 +609,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.69400117Z",
-      "duration_ms": 4
+      "ran_at": "2026-08-06T01:47:41.20968216Z",
+      "duration_ms": 9
     },
     {
       "case": {
@@ -646,8 +646,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.698228728Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.222946766Z",
+      "duration_ms": 20
     },
     {
       "case": {
@@ -684,8 +684,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.699302047Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.243958431Z",
+      "duration_ms": 36
     },
     {
       "case": {
@@ -721,8 +721,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.700263423Z",
-      "duration_ms": 8
+      "ran_at": "2026-08-06T01:47:41.280958246Z",
+      "duration_ms": 18
     },
     {
       "case": {
@@ -760,8 +760,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.708573623Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.300424826Z",
+      "duration_ms": 27
     },
     {
       "case": {
@@ -797,8 +797,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.709989256Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.330070358Z",
+      "duration_ms": 8
     },
     {
       "case": {
@@ -834,8 +834,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.711627029Z",
-      "duration_ms": 8
+      "ran_at": "2026-08-06T01:47:41.354749109Z",
+      "duration_ms": 36
     },
     {
       "case": {
@@ -871,8 +871,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.720155744Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.392337214Z",
+      "duration_ms": 16
     },
     {
       "case": {
@@ -908,8 +908,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.721585493Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.409378634Z",
+      "duration_ms": 20
     },
     {
       "case": {
@@ -944,8 +944,8 @@
         "conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.722612733Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.43109525Z",
+      "duration_ms": 15
     },
     {
       "case": {
@@ -983,8 +983,8 @@
         "conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.723699051Z",
-      "duration_ms": 0
+      "ran_at": "2026-08-06T01:47:41.453142658Z",
+      "duration_ms": 7
     },
     {
       "case": {
@@ -1042,8 +1042,8 @@
         "flip[1] relay 改回 true → 同一條連線應立刻恢復 → conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.724524164Z",
-      "duration_ms": 18
+      "ran_at": "2026-08-06T01:47:41.470435136Z",
+      "duration_ms": 103
     },
     {
       "case": {
@@ -1102,8 +1102,8 @@
         "flip[1] relay 拿掉 master 否決 → 恢復 → conn.TracingEnabled() = true (expect true)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.743074442Z",
-      "duration_ms": 4
+      "ran_at": "2026-08-06T01:47:41.574372515Z",
+      "duration_ms": 63
     },
     {
       "case": {
@@ -1151,8 +1151,8 @@
         "flip[0] 事後才綁 provider（otel-nats-tracing=true）→ 仍關閉 → conn.TracingEnabled() = false (expect false)",
         "RESULT: PASS"
       ],
-      "ran_at": "2026-08-06T00:51:33.747782347Z",
-      "duration_ms": 1
+      "ran_at": "2026-08-06T01:47:41.638411488Z",
+      "duration_ms": 20
     }
   ],
   "total": 29
