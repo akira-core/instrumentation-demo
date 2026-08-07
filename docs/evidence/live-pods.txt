@@ -1,12 +1,12 @@
-NAME                                    READY   STATUS    RESTARTS   AGE     IP            NODE                       NOMINATED NODE   READINESS GATES
-backend-678dff47d5-6mdhj                1/1     Running   0          8m27s   10.244.0.19   demo-trace-control-plane   <none>           <none>
-chi-clickhouse-cluster-default-0-0-0    1/1     Running   0          9m9s    10.244.0.15   demo-trace-control-plane   <none>           <none>
-chk-clickhouse-cluster-cluster1-0-0-0   1/1     Running   0          9m33s   10.244.0.13   demo-trace-control-plane   <none>           <none>
-clickhouse-operator-b7d98c9d4-qk572     2/2     Running   0          10m     10.244.0.9    demo-trace-control-plane   <none>           <none>
-frontend-6594b5b764-hr6g2               1/1     Running   0          8m27s   10.244.0.20   demo-trace-control-plane   <none>           <none>
-grafana-79b965d8bd-9t26b                1/1     Running   0          8m28s   10.244.0.16   demo-trace-control-plane   <none>           <none>
-nats-0                                  3/3     Running   0          10m     10.244.0.8    demo-trace-control-plane   <none>           <none>
-nats-box-7db7ffb587-c94js               1/1     Running   0          10m     10.244.0.5    demo-trace-control-plane   <none>           <none>
-relay-proxy-6596f98c67-kfckd            1/1     Running   0          3m16s   10.244.0.22   demo-trace-control-plane   <none>           <none>
-rotel-5566779b79-98cts                  1/1     Running   0          10m     10.244.0.10   demo-trace-control-plane   <none>           <none>
-victoria-metrics-0                      1/1     Running   0          8m27s   10.244.0.21   demo-trace-control-plane   <none>           <none>
+NAME                                    READY   STATUS    RESTARTS   AGE     IP            NODE                    NOMINATED NODE   READINESS GATES
+backend-68c7d6bf6d-bhqbv                1/1     Running   0          47h     10.244.0.37   desktop-control-plane   <none>           <none>
+chi-clickhouse-cluster-default-0-0-0    1/1     Running   0          4d23h   10.244.0.27   desktop-control-plane   <none>           <none>
+chk-clickhouse-cluster-cluster1-0-0-0   1/1     Running   0          4d23h   10.244.0.25   desktop-control-plane   <none>           <none>
+clickhouse-operator-76d685dd79-26jpd    2/2     Running   0          4d23h   10.244.0.21   desktop-control-plane   <none>           <none>
+frontend-fbdf5d7d4-9dfwd                1/1     Running   0          5d2h    10.244.0.12   desktop-control-plane   <none>           <none>
+grafana-7449d4597-6mfhx                 1/1     Running   0          4d22h   10.244.0.33   desktop-control-plane   <none>           <none>
+nats-0                                  3/3     Running   0          5d2h    10.244.0.15   desktop-control-plane   <none>           <none>
+nats-box-6bd868b75f-9lwns               1/1     Running   0          5d2h    10.244.0.5    desktop-control-plane   <none>           <none>
+relay-proxy-599984fc8f-cmn7q            1/1     Running   0          48s     10.244.0.38   desktop-control-plane   <none>           <none>
+rotel-f77fccc78-ngvnt                   1/1     Running   0          4d23h   10.244.0.22   desktop-control-plane   <none>           <none>
+victoria-metrics-0                      1/1     Running   0          5d2h    10.244.0.17   desktop-control-plane   <none>           <none>
