@@ -60,14 +60,13 @@ endef
 bootstrap:
 	git submodule update --init --remote
 
-# Run the helm-unittest suites of the locally patched charts. No cluster needed.
-# Worth running before `make deploy`: these suites exist to catch a local patch
-# being dropped on a chart re-pull, which otherwise shows up only as a relay
-# proxy that starts healthy and serves no flags.
+# Run the upstream helm-unittest suites shipped with the vendored relay-proxy
+# chart. No cluster needed. Local customization lives in deploy/values/, not
+# in the chart, so these suites only guard upstream template regressions.
 chart-test:
 	@helm plugin list 2>/dev/null | grep -q '^unittest' || { \
 		echo "helm-unittest plugin missing. Install it with:"; \
-		echo "  helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false"; \
+		echo "  helm plugin install https://github.com/helm-unittest/helm-unittest"; \
 		exit 1; \
 	}
 	helm unittest charts/relay-proxy
@@ -132,14 +131,6 @@ kind-load: build-images
 # at the address otelnats is pointed at (OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT
 # in deploy/base/backend.yaml).
 #
-# relay-proxy also takes --force-conflicts. Helm owns the relay-proxy-flags
-# ConfigMap through server-side apply, and flipping a flag live (the demo's
-# whole point) hands .data to the kubectl field manager. Server-side apply only
-# raises a conflict when the values disagree, so the very situation the demo
-# creates — a live value differing from charts/relay-proxy/config/ — is exactly
-# what would abort the next deploy. --force-conflicts says what is already true:
-# the chart directory is the source of truth, and a live flip is temporary.
-#
 # ClickHouse is installed in two steps on first apply so CRDs from the operator
 # exist before the CHI/CHK custom resources are created (avoids a race where
 # helm applies CRs before the crd-install Job finishes).
@@ -157,13 +148,13 @@ helm-install: kube-context
 		--set operator.enabled=false \
 		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
-	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace --force-conflicts
+	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n $(NAMESPACE) --create-namespace
 
-# Apply the in-house services (frontend, backend) via the Kustomize base.
-# Flag definitions are NOT here: they ship inside the relay proxy chart under
-# charts/relay-proxy/config/ and are installed by helm-install above, so the
-# relay proxy has its flags from its very first start.
+# Apply the in-house services and the library flags ConfigMap (demo-feature-flags)
+# via the Kustomize base. The relay proxy reads that ConfigMap through GOFF's
+# configmap retriever (see deploy/values/relay-proxy.yaml); startWithRetrieverError
+# keeps it up if helm-install raced ahead of this apply.
 k8s-apply: kube-context
 	kubectl apply -k deploy/base
 

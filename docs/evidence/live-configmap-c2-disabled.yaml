@@ -1,6 +1,6 @@
-# Merge patch applied to ConfigMap relay-proxy-flags in namespace demo.
+# Merge patch applied to ConfigMap demo-feature-flags in namespace demo.
 data:
-  otel-nats-tracing.yaml: |
+  flags.yaml: |
     otel-nats-tracing:
       variations:
         enabled: true

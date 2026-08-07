@@ -9,15 +9,10 @@
 # installs its own OpenFeature provider against (see the backend manifest's
 # OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT; no backend code reads it).
 #
-# Flags are NOT defined here either. They live one-file-per-concern under
-# charts/relay-proxy/config/, which the chart turns into the `relay-proxy-flags`
-# ConfigMap, mounts at /flags, and points a generated `file` retriever at. No
-# ConfigMap API RBAC is required.
-
-# Ship the flag files in charts/relay-proxy/config/ and let the chart generate
-# the matching retrievers — hence no `retriever:` block in the config below.
-flags:
-  enabled: true
+# Flag definitions live in deploy/base/feature-flags.yaml (ConfigMap
+# demo-feature-flags). The official chart has no volume-mount helpers, so the
+# relay uses GOFF's Kubernetes ConfigMap retriever and the Role/RoleBinding
+# below. Live edit: kubectl edit configmap demo-feature-flags -n demo.
 
 relayproxy:
   config: |
@@ -30,25 +25,26 @@ relayproxy:
       # so the pod's readiness now depends on it being served correctly.
       monitoringPort: 1032
 
-    # How often GOFF re-reads the mounted flag files, in ms. Deliberately short
-    # (1s) so a `kubectl edit configmap relay-proxy-flags` reaches the relay's
-    # own view as soon as kubelet has refreshed the mount. This is only the
-    # first of two hops we control: otelnats's provider evaluates in-process and
-    # polls this relay every OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in
-    # this demo). Neither is the bottleneck — the kubelet's own ConfigMap sync
-    # period is, measured at 53s on kind. Budget ~60s for a flip to land.
+    # How often GOFF re-reads the ConfigMap via the API, in ms. Deliberately
+    # short (1s) so a `kubectl edit configmap demo-feature-flags` reaches the
+    # relay quickly. otelnats's provider then polls this relay every
+    # OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL (2s in this demo). Budget a
+    # few seconds for a flip to land (no kubelet mount hop with the API path).
     pollingInterval: 1000
 
-    # Fail loudly if the flag files are unreadable. This used to be true because
-    # the ConfigMap was created by a later `kubectl apply -k deploy/base` and the
-    # pod could legitimately start before it existed. The flags now install with
-    # the chart, so the mount is populated from the pod's very first start and an
-    # unreadable retriever is a real defect — one that, tolerated, produces a
-    # relay proxy that is Ready and answers every evaluation with the caller's
-    # default.
-    startWithRetrieverError: false
+    # Tolerate helm-install before k8s-apply: the flags ConfigMap is created by
+    # `kubectl apply -k deploy/base`, which runs after helm in `make deploy`.
+    # Once the ConfigMap exists the retriever succeeds; until then the process
+    # stays up instead of CrashLooping.
+    startWithRetrieverError: true
 
     logLevel: info
+
+    retriever:
+      kind: configmap
+      namespace: demo
+      configmap: demo-feature-flags
+      key: flags.yaml
 
     # Evaluation results are logged rather than shipped anywhere — this is a
     # local demo, and no flag-analytics backend exists in the stack.
@@ -81,5 +77,35 @@ resources:
 serviceAccount:
   create: true
 
-# No ConfigMap API Role/RoleBinding — flags come from the chart-managed mount.
-extraManifests: []
+# RBAC so the relay's ServiceAccount can read demo-feature-flags. The official
+# chart supports this through extraManifests (templated); no chart fork needed.
+extraManifests:
+  - |
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: {{ include "relay-proxy.fullname" . }}-flags
+      namespace: {{ .Release.Namespace }}
+      labels:
+        {{- include "relay-proxy.labels" . | nindent 8 }}
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        resourceNames: ["demo-feature-flags"]
+        verbs: ["get", "list", "watch"]
+  - |
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: {{ include "relay-proxy.fullname" . }}-flags
+      namespace: {{ .Release.Namespace }}
+      labels:
+        {{- include "relay-proxy.labels" . | nindent 8 }}
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: {{ include "relay-proxy.fullname" . }}-flags
+    subjects:
+      - kind: ServiceAccount
+        name: {{ include "relay-proxy.serviceAccountName" . }}
+        namespace: {{ .Release.Namespace }}
