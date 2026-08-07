@@ -13,5 +13,5 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "relay-proxy.selectorLabels" . | nindent 6 }}
+      name: {{ template "relay-proxy.fullname" . }}
 {{ end }}

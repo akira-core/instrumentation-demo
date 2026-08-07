@@ -1,6 +1,5 @@
 apiVersion: v2
 appVersion: v1.55.1
-kubeVersion: ">=1.19.0-0"
 description: A Helm chart to deploy go-feature-flag-relay proxy into Kubernetes
 home: https://gofeatureflag.org
 icon: https://raw.githubusercontent.com/thomaspoignant/go-feature-flag/main/logo.png

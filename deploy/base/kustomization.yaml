@@ -1,16 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# In-house services only (frontend, backend). NATS, ClickHouse (+ Rotel via the
-# altinity-operator umbrella chart), Grafana, VictoriaMetrics, and the GOFF relay
-# proxy are installed separately via their vendored Helm charts under charts/
-# (the relay proxy's ServiceAccount/Role/RoleBinding ship with its chart via
-# extraManifests, not from here) — see `make deploy` / README.md.
+# In-house services + the library feature-flag ConfigMap. NATS, ClickHouse
+# (+ Rotel via the altinity-operator umbrella chart), Grafana, VictoriaMetrics,
+# and the GOFF relay proxy are installed separately via their vendored Helm
+# charts under charts/ — see `make deploy` / README.md.
 #
-# The feature-flag definitions are not here either: they ship inside the relay
-# proxy chart under charts/relay-proxy/config/, so the relay proxy has them from
-# its first start instead of waiting for this Kustomize base to be applied.
+# Flag definitions live here (feature-flags.yaml → ConfigMap demo-feature-flags).
+# The official relay-proxy chart reads them through GOFF's configmap retriever;
+# Role/RoleBinding for that read ship via deploy/values/relay-proxy.yaml
+# extraManifests.
 resources:
   - namespace.yaml
+  - feature-flags.yaml
   - backend.yaml
   - frontend.yaml
