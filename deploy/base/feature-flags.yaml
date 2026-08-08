@@ -6,21 +6,36 @@
 # Edit live during a demo — neither the relay proxy nor the backend restarts:
 #   kubectl edit configmap demo-feature-flags -n demo
 #
-# Latency is the relay's pollingInterval (1000 ms) + the backend provider's
-# poll interval (OTEL_INSTRUMENTATION_GO_FLAGS_POLL_INTERVAL, 2s). There is no
-# kubelet mount refresh hop with the API retriever.
+# Latency differs per runtime, and the difference is real rather than noise:
+#
+#   Go backend  relay pollingInterval (1000 ms) + provider poll (2s)
+#   JS service  the same, PLUS one snapshot refresh (2s)
+#
+# The JS hop exists because OpenFeature JS has no synchronous evaluation path
+# while the wrapper's publish is synchronous, so the ladder is resolved against a
+# snapshot a background task refreshes. Wait out the LARGER bound before
+# concluding anything from a flip. There is no kubelet mount refresh hop with
+# the API retriever.
 #
 # Library flags only. This demo does not evaluate application-level flags to
 # gate business behavior; the NATS round trip always runs on a successful
 # demo request.
 #
-#   otel-nats-tracing  consumed by the otelnats LIBRARY itself, with no
-#                      application code involved. Under instrumentation-go's
+#   otel-nats-tracing  consumed by the otel-nats LIBRARY itself, in BOTH
+#                      runtimes, with no application code involved. Under the
 #                      ladder (relay > env > option > default) the relay is
 #                      authoritative in BOTH directions.
 #
-# Demo posture (option C): backend sets OTEL_NATS_TRACING_ENABLED=false and
-# OTEL_INSTRUMENTATION_GO_TRACING_ENABLED=1. Default variation below is
+#                      One key, two languages: it names the MODULE rather than
+#                      the runtime, so an operator flipping "NATS tracing" means
+#                      the Go backend and the JS service together. The master
+#                      veto is per-runtime and is NOT defined here
+#                      (otel-instrumentation-go-tracing /
+#                      otel-instrumentation-js-tracing); each defaults to
+#                      enabled, so defining them would change nothing.
+#
+# Demo posture (option C): both services set OTEL_NATS_TRACING_ENABLED=false and
+# their runtime's master switch truthy. Default variation below is
 # `enabled`, so out-of-the-box NATS spans appear because the relay enables what
 # the module environment left off. Flip to `disabled` to stop spans; flip back
 # to restore them — no redeploy.

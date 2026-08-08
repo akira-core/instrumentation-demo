@@ -1,0 +1,20 @@
+TraceId=1917af3e64b015ccec43f86dd1e0e5ba
+   ┌─SpanName───────────────────┬─SpanKind─┬─ServiceName─────┐
+1. │ process demo.trace.request │ Consumer │ demo-js-service │
+2. │ publish demo.trace.js      │ Producer │ demo-js-service │
+3. │ process demo.trace.js      │ Consumer │ demo-js-service │
+   └────────────────────────────┴──────────┴─────────────────┘
+js_nats_count=3
+js_nats_spans_cluster_wide_since_probe=3
+--- js-service, recent 15 ---
+   ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+1. │ 1917af3e64b0 │ process demo.trace.js      │ Consumer │
+2. │ 1917af3e64b0 │ process demo.trace.request │ Consumer │
+3. │ 1917af3e64b0 │ publish demo.trace.js      │ Producer │
+4. │ 15e2999e7680 │ process demo.trace.js      │ Consumer │
+5. │ 15e2999e7680 │ publish demo.trace.js      │ Producer │
+6. │ 15e2999e7680 │ process demo.trace.request │ Consumer │
+7. │ fb07bd739c06 │ process demo.trace.js      │ Consumer │
+8. │ fb07bd739c06 │ process demo.trace.request │ Consumer │
+9. │ fb07bd739c06 │ publish demo.trace.js      │ Producer │
+   └──────────────┴────────────────────────────┴──────────┘
