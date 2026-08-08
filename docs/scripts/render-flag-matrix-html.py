@@ -143,8 +143,11 @@ def main() -> None:
     <article class="case" id="live-{esc(c['id'])}">
       <header>
         <h3><code>{esc(c['id'])}</code> {esc(c['title'])} {badge(c['pass'])}</h3>
-        <p class="meta">traceId=<code>{esc(c.get('traceId'))}</code> · nats={esc(c.get('nats_count'))} · http={esc(c.get('http_count'))}
+        <p class="meta">traceId=<code>{esc(c.get('traceId'))}</code>
+        · backend nats={esc(c.get('nats_count'))} · js-service nats={esc(c.get('js_nats_count', 'n/a'))}
+        · http={esc(c.get('http_count'))}
         · 本次探測後全叢集 NATS span={esc(c.get('nats_spans_cluster_wide_since_probe', 'n/a'))}
+        （js-service {esc(c.get('js_nats_spans_cluster_wide_since_probe', 'n/a'))}）
         · 收斂用了 {esc(c.get('attempts', 'n/a'))} 次嘗試</p>
       </header>
       <h4>① 設定步驟</h4>
@@ -154,8 +157,13 @@ def main() -> None:
       {f'<p class="meta">{esc(c["relay_eval_note"])}</p>' if c.get("relay_eval_note") else ''}
       <h4>③ Demo API 回應</h4>
       {pre(json.dumps(c.get('api'), ensure_ascii=False, indent=2))}
-      <h4>④ ClickHouse 查詢結果</h4>
+      <h4>④ ClickHouse 查詢結果（demo-backend）</h4>
       {pre(c.get('clickhouse') or '')}
+      <h4>④b ClickHouse 查詢結果（demo-js-service）</h4>
+      <p class="meta">同一次翻轉、同一條 trace。兩份分開列，是因為 <code>nats_count</code>
+      只算 demo-backend —— js-service 的 consumer span 是 parent-child（Go 那邊用 span link），
+      會落在同一條 trace 上，不過濾就會讓這個既有欄位的意義悄悄改變。</p>
+      {pre(c.get('clickhouse_js') or '（此次擷取沒有 js-service 資料）')}
       <h4>⑤ 證據檔案（docs/evidence/）</h4>
       {pre(json.dumps(c.get('files'), ensure_ascii=False, indent=2))}
     </article>
@@ -201,6 +209,7 @@ def main() -> None:
             f"<td>{esc(c['title'])}</td>"
             f"<td>{esc((c.get('relay_eval') or {}).get('value'))}</td>"
             f"<td>{esc(c.get('nats_count'))}</td>"
+            f"<td>{esc(c.get('js_nats_count', 'n/a'))}</td>"
             f"<td>{esc(c.get('http_count'))}</td>"
             f"<td>{mark}</td></tr>"
         )
@@ -346,7 +355,7 @@ open docs/otel-nats-feature-flag-matrix.zh-TW.html"""
 
     <h3>叢集實測</h3>
     <table>
-      <thead><tr><th>ID</th><th>標題</th><th>relay value</th><th>NATS</th><th>HTTP</th><th>結果</th></tr></thead>
+      <thead><tr><th>ID</th><th>標題</th><th>relay value</th><th>NATS<br>(backend)</th><th>NATS<br>(js-service)</th><th>HTTP</th><th>結果</th></tr></thead>
       <tbody>
       {''.join(live_rows)}
       </tbody>

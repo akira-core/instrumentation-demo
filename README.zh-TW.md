@@ -25,7 +25,7 @@ instrumentation — 不需改應用程式碼、不需重啟。
 | **`otelnats`**（`instrumentation-go`） | NATS 發布／訂閱 span、訊息標頭上的 W3C 脈絡、非同步 **span link**、執行期旗標 `otel-nats-tracing` |
 | **OpenFeature + GOFF provider**（**應用零程式碼**） | `otelnats` 依 `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` 自行安裝 provider，並在每次操作解析 `otel-nats-tracing` |
 | **瀏覽器 OTel**（`@opentelemetry/sdk-trace-web` + fetch instrumentation） | CLIENT span，並在 `POST /api/demo-trace` 注入 `traceparent` |
-| **`@akira-core/otel-nats`**（`instrumentation-js` submodule） | 已掛在 tree 內供 JS NATS 使用；本 UI demo 著重 HTTP→Go→NATS 路徑 |
+| **`@akira-core/otel-nats`** + **`@akira-core/otel-flags`**（`instrumentation-js` submodule） | `js-service` Deployment：NATS publish/subscribe span、W3C header，以及與 Go backend **同一個** `otel-nats-tracing` relay 旗標 —— 翻一次同時管住兩種 runtime |
 
 點一次按鈕後，Grafana 裡能看到正確的 span 圖，且切換旗標能即時停止或恢復函式庫的
 instrumentation、同時業務路徑照常運作，就代表接線方式符合我們建議應用程式
@@ -92,6 +92,38 @@ publisher，而不是 parent — 符合非同步訊息的 OTel 語意指引。
 
 Grafana 預建儀表板含 **span-linked async spans** 面板，不必硬湊成單一
 waterfall 也能看完整故事。
+
+### 兩種 runtime，一個旗標
+
+`js-service` 是以 `@akira-core/otel-nats` 建構的 Node NATS 參與者。它訂閱 `demo.trace.request` 時**不帶 queue group**，因此 core NATS 會把每則訊息**同時**送給它與 Go backend 既有的 subscriber，而不是取而代之 —— Go 的往返與其 span 數完全不變。接著它發布到 `demo.trace.js` 並自行消費；第二段是**為了展示的自環**，不是真實的服務邊界，存在的目的是在不多一個 image 的前提下也涵蓋 JS 函式庫的 producer 側。
+
+兩個服務解析**同一個** `otel-nats-tracing` key，因為該 key 命名的是**模組**而非 runtime。一次 ConfigMap 翻轉因此同時停止與恢復兩邊的 NATS instrumentation。主 veto 則維持各自獨立（`otel-instrumentation-go-tracing` / `otel-instrumentation-js-tracing`）。
+
+**傳播上限不同，而且這個差異是真的：**
+
+| Runtime | 上限 | 原因 |
+|---|---|---|
+| Go backend | relay poll（1s）+ provider poll（2s）= **3s** | 每次操作直接向 OpenFeature 解析 |
+| `js-service` | 同上，**再加一次 snapshot refresh（2s）= 5s** | OpenFeature JS 沒有同步評估路徑，而 wrapper 的 `publish` 是同步的，所以階梯改為對背景維持的 snapshot 解析 |
+
+從翻轉推論任何結論之前，請等過**較大**的那個上限。`docs/scripts/capture-live-evidence.sh` 依它調節節奏，並記錄實際採用的上限。
+
+另外，`js-service` pod 啟動後的**第一次請求**會產生不完整的 JS span：某個 flag key 第一次解析會回傳本地值，同時排入評估。這個視窗在「開啟」方向上是 fail-safe —— 它可能延遲 relay 驅動的開啟，但永遠不會憑空製造一個 —— 不是缺陷。
+
+### 兩個函式庫連接 consumer span 的方式不同
+
+同一則訊息、兩種拓樸，在 Grafana 上都看得到：
+
+- **Go**（`instrumentation-go`）把 consumer span 開成 **root**，並以 span **link** 掛上 producer —— 見上一節。
+- **JS**（`@akira-core/otel-nats`）把 consumer span 開成抽取出的遠端 context 的**子 span**，因此它的 span 落在 **producer 的 trace** 上。
+
+於是一次 `demo.trace.request` 發布會同時產生：一個在自己 trace 上的 Go consumer，以及一個在發布者 trace 上的 JS consumer。兩者都沒有壞；這是兩個函式庫的不同選擇，記在這裡是為了讓在 Grafana 上對照兩者的讀者不會誤判其中一個有問題。
+
+這也是 evidence 腳本的 `nats_count` 要過濾 `ServiceName = 'demo-backend'` 的原因：不過濾的話，部署 `js-service` 會悄悄膨脹一個已經發布出去的數字。
+
+### NATS 訊息計數會出現階梯
+
+`demo.trace.request` 現在每則訊息有**兩次**投遞而非一次，因此 VictoriaMetrics 抓取的 NATS 訊息計數序列會在 `js-service` 部署的時間點出現一個階梯。那是 fan-out 正常運作，不是退化。
 
 ### 遙測管線
 

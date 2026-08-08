@@ -32,22 +32,22 @@
 - [x] 4.4 Flip the ConfigMap to `disabled`; after both propagation bounds, confirm both runtimes emit no NATS spans, the demo request still succeeds, and the JS service still logs a consumed message
 - [x] 4.5 Flip back to `enabled`; confirm both runtimes resume
 - [x] 4.6 Confirm neither pod's restart count changed across both flips
-- [ ] 4.7 Confirm the JS service stays Ready with the relay scaled to zero, and recovers when it returns
+- [x] 4.7 Confirm the JS service stays Ready with the relay scaled to zero, and recovers when it returns
 
 ## 5. Evidence and reporting
 
-- [ ] 5.1 Extend `docs/scripts/capture-live-evidence.sh`: per campaign, add a ClickHouse query filtered to `ServiceName = 'demo-js-service'` written to `live-step-c<N>-clickhouse-js.txt`, and add a JS span count per campaign to `live-summary.json` — additively, leaving every existing key's name and meaning intact
-- [ ] 5.2 Derive the script's post-flip wait from the larger of the two runtimes' propagation bounds, and record which bound was used in the capture log
-- [ ] 5.3 Capture the JS service's env and pod state into the baseline artifacts alongside the backend's
-- [ ] 5.4 Extend `docs/scripts/render-flag-matrix-html.py` to render both runtimes in one report — a column per runtime, not a second report
-- [ ] 5.5 Regenerate `docs/evidence/` and both rendered HTML reports in a single commit so no reader sees a half-updated set
-- [ ] 5.6 Run the capture script end to end on a live cluster and confirm it exits clean
+- [x] 5.1 Extend `docs/scripts/capture-live-evidence.sh`: per campaign, add a ClickHouse query filtered to `ServiceName = 'demo-js-service'` written to `live-step-c<N>-clickhouse-js.txt`, and add a JS span count per campaign to `live-summary.json` — additively, leaving every existing key's name and meaning intact
+- [x] 5.2 Derive the script's post-flip wait from the larger of the two runtimes' propagation bounds, and record which bound was used in the capture log
+- [x] 5.3 Capture the JS service's env and pod state into the baseline artifacts alongside the backend's
+- [x] 5.4 Extend `docs/scripts/render-flag-matrix-html.py` to render both runtimes in one report — a column per runtime, not a second report
+- [x] 5.5 Regenerate `docs/evidence/` and both rendered HTML reports in a single commit so no reader sees a half-updated set
+- [x] 5.6 Run the capture script end to end on a live cluster and confirm it exits clean
 
 ## 6. Docs
 
-- [ ] 6.1 `README.md`: correct the component table's claim that the JS library is only "available in-tree"; add the JS service to the architecture diagram and the component list
-- [ ] 6.2 `README.md`: document the two-runtime flag flip, stating each runtime's propagation bound separately, and note the `demo.trace.js` self-loop is for demonstration rather than a realistic service boundary
-- [ ] 6.3 `README.zh-TW.md`: mirror 6.1 and 6.2
-- [ ] 6.4 Note in the README that the metrics pipeline's NATS message-count series steps up when this lands, since the request subject now has two deliveries per message
-- [ ] 6.5 Run `openspec validate add-js-nats-service --strict`
+- [x] 6.1 `README.md`: correct the component table's claim that the JS library is only "available in-tree"; add the JS service to the architecture diagram and the component list
+- [x] 6.2 `README.md`: document the two-runtime flag flip, stating each runtime's propagation bound separately, and note the `demo.trace.js` self-loop is for demonstration rather than a realistic service boundary
+- [x] 6.3 `README.zh-TW.md`: mirror 6.1 and 6.2
+- [x] 6.4 Note in the README that the metrics pipeline's NATS message-count series steps up when this lands, since the request subject now has two deliveries per message
+- [x] 6.5 Run `openspec validate add-js-nats-service --strict`
 - [ ] 6.6 Archive `align-demo-feature-flag-relay` **before** archiving this change: `feature-flag-relay-proxy` is still a delta in `changes/` rather than a main spec, and this change's `MODIFIED` requirements have nothing to modify until it lands in `openspec/specs/`

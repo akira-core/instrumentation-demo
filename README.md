@@ -27,7 +27,7 @@ realistic path**, not only in unit tests:
 | **`otelnats`** (`instrumentation-go`) | NATS publish/subscribe spans, W3C headers on messages, async **span links**, runtime flag `otel-nats-tracing` |
 | **OpenFeature + GOFF provider** (**zero application code**) | `otelnats` installs its own provider from `OTEL_INSTRUMENTATION_GO_FLAGS_ENDPOINT` and resolves `otel-nats-tracing` per operation |
 | **Browser OTel** (`@opentelemetry/sdk-trace-web` + fetch instrumentation) | CLIENT span + `traceparent` injection on `POST /api/demo-trace` |
-| **`@akira-core/otel-nats`** (`instrumentation-js`, submodule) | Available in-tree for JS NATS work; this UI demo focuses on the HTTP→Go→NATS path |
+| **`@akira-core/otel-nats`** + **`@akira-core/otel-flags`** (`instrumentation-js`, submodule) | The `js-service` Deployment: NATS publish/subscribe spans, W3C headers, and the **same** `otel-nats-tracing` relay flag the Go backend resolves — one flip governs both runtimes |
 
 If spans appear correctly in Grafana after a click, and flipping a flag stops
 (or restores) library instrumentation live while the business path keeps running,
@@ -52,7 +52,9 @@ the libraries are wired the way production apps should wire them.
 │                                  │  └─otelnats polls──┘ ConfigMap API       │
 │                                  │    (no app code)   │ demo-feature-flags  │
 │                                  ▼                    │ (configmap retriever)│
-│                               NATS                    │                     │
+│                               NATS ◄──js-service──────┤                     │
+│                                       (Node; polls    │                     │
+│                                        the SAME flag) │                     │
 │                                  │                                          │
 │  Backend + Frontend + Relay ──► rotel ──► ClickHouse ◄── Grafana           │
 │  (OTLP)                         │                                           │
@@ -100,6 +102,38 @@ intentional for async messaging (OTel messaging guidance).
 
 The provisioned Grafana dashboard has a panel for **span-linked async
 spans** so you can still see the full story.
+
+### Two runtimes, one flag
+
+`js-service` is a Node NATS participant built on `@akira-core/otel-nats`. It subscribes to `demo.trace.request` with **no queue group**, so core NATS delivers every message to it *alongside* the Go backend's own subscriber rather than instead of it — the Go round trip and its span counts are unchanged. It then publishes on `demo.trace.js` and consumes that too; that second hop is a **self-loop for demonstration**, not a realistic service boundary, and it exists so the JS library's producing side is exercised without a second image.
+
+Both services resolve the **same** `otel-nats-tracing` key, because that key names the *module* rather than the runtime. One ConfigMap flip therefore stops and starts NATS instrumentation in both. The master veto stays per-runtime (`otel-instrumentation-go-tracing` / `otel-instrumentation-js-tracing`).
+
+**Propagation bounds differ, and the difference is real:**
+
+| Runtime | Bound | Why |
+|---|---|---|
+| Go backend | relay poll (1s) + provider poll (2s) = **3s** | resolves through OpenFeature directly, per operation |
+| `js-service` | the same **plus one snapshot refresh (2s) = 5s** | OpenFeature JS has no synchronous evaluation path while the wrapper's `publish` is synchronous, so the ladder resolves against a snapshot a background task refreshes |
+
+Wait out the **larger** bound before concluding anything from a flip. `docs/scripts/capture-live-evidence.sh` paces on it and records which bound it used.
+
+Expect the **first request after a `js-service` pod start** to produce incomplete JS spans: the first resolution of a flag key returns the local answer while the evaluation is scheduled. That window is fail-safe in the enabling direction — it can delay a relay-driven enable, never introduce one — and is not a defect.
+
+### The two libraries connect consumer spans differently
+
+Same message, two topologies, both visible in Grafana:
+
+- **Go** (`instrumentation-go`) starts its consumer span as a **root** and attaches the producer as a span **link** — see the section above.
+- **JS** (`@akira-core/otel-nats`) makes its consumer span a **child** of the extracted remote context, so its spans land on the **producer's** trace.
+
+One `demo.trace.request` publish therefore yields a Go consumer on its own trace *and* a JS consumer on the publisher's trace. Neither is broken; they are different choices in the two libraries, recorded here so a reader comparing them in Grafana does not conclude that one of them is.
+
+It is also why the evidence script's `nats_count` filters on `ServiceName = 'demo-backend'`: without that filter, deploying `js-service` would have silently inflated an already-published number.
+
+### The NATS message-count series steps up
+
+`demo.trace.request` now has **two** deliveries per message rather than one, so the NATS message counters VictoriaMetrics scrapes show a step change at the point `js-service` was deployed. That is the fan-out working, not a regression.
 
 ### Telemetry pipeline
 

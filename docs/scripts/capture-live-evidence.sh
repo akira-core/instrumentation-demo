@@ -33,6 +33,23 @@ CONVERGE_ATTEMPTS="${CONVERGE_ATTEMPTS:-30}"
 CONVERGE_SLEEP="${CONVERGE_SLEEP:-6}"   # seconds between backend probes
 SPAN_SETTLE="${SPAN_SETTLE:-6}"         # seconds for a trace to land in ClickHouse
 
+# Propagation bounds, per runtime. They differ, and the difference is real:
+#
+#   backend     relay pollingInterval (1s) + provider poll (2s)          = 3s
+#   js-service  the same, PLUS one snapshot refresh (2s)                 = 5s
+#
+# The JS hop exists because OpenFeature JS has no synchronous evaluation path
+# while the wrapper's publish is synchronous, so its ladder resolves against a
+# snapshot a background task refreshes.
+#
+# Convergence is driven by retrying the probe rather than by sleeping this out,
+# so these are the floor rather than the schedule — but the LARGER one is what a
+# reader must wait before concluding anything, and it is logged so a capture can
+# be audited against it later.
+BACKEND_PROPAGATION_BOUND="${BACKEND_PROPAGATION_BOUND:-3}"
+JS_PROPAGATION_BOUND="${JS_PROPAGATION_BOUND:-5}"
+FLIP_BOUND=$(( BACKEND_PROPAGATION_BOUND > JS_PROPAGATION_BOUND ? BACKEND_PROPAGATION_BOUND : JS_PROPAGATION_BOUND ))
+
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 
 cleanup() {
@@ -60,8 +77,17 @@ chq_num() {
     tr -d '[:space:]'
 }
 
+# nats_count_for_trace counts the BACKEND's NATS spans on one trace.
+#
+# The ServiceName filter is not cosmetic and must not be dropped. js-service
+# parents its consumer span on the extracted remote context where the Go library
+# uses a span link, so its spans land on the REQUEST's trace — an unfiltered
+# count here would silently jump from 1 to 4 the moment js-service was deployed,
+# and every previously published campaign would read as if the backend had
+# started emitting more. The JS side is counted separately, by
+# js_nats_count_for_trace.
 nats_count_for_trace() {
-  chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE '%demo.trace%'"
+  chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE '%demo.trace%' AND ServiceName = 'demo-backend'"
 }
 
 http_count_for_trace() {
@@ -85,6 +111,23 @@ http_count_for_trace() {
 #     window it replaced, because it looks stronger.
 ch_now() {
   chq_num "SELECT toUnixTimestamp64Milli(now64(3))"
+}
+
+# js_nats_count_for_trace is the js-service half of the same question.
+#
+# Same trace id as the backend's, deliberately: proving the two runtimes stop and
+# start together is the whole point, and reading them off one trace is what makes
+# that comparison direct.
+js_nats_count_for_trace() {
+  chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE '%demo.trace%' AND ServiceName = 'demo-js-service'"
+}
+
+# js_nats_count_since is the js-service half of nats_count_since, and carries the
+# same reasoning: "gone from this trace" and "gone everywhere" are different
+# claims, and only the second one distinguishes a disabled module from broken
+# propagation.
+js_nats_count_since() {
+  chq_num "SELECT count() FROM otel.otel_traces WHERE SpanName LIKE '%demo.trace%' AND ServiceName = 'demo-js-service' AND Timestamp > fromUnixTimestamp64Milli(toInt64($1))"
 }
 
 # nats_count_since counts NATS spans across ALL traces emitted after a mark.
@@ -185,7 +228,7 @@ demo_trace() {
 
 # query_spans writes the human-readable per-case ClickHouse evidence.
 query_spans() {
-  local label="$1" tid="$2" nats="$3" http="$4" recent="$5"
+  local label="$1" tid="$2" nats="$3" http="$4" recent="$5" js="$6" js_recent="$7"
   local f="$EVID/live-clickhouse-${label}.txt"
   {
     echo "TraceId=$tid"
@@ -197,6 +240,19 @@ query_spans() {
     chq "SELECT substring(TraceId,1,12) AS t, SpanName, SpanKind FROM otel.otel_traces WHERE Timestamp > now() - INTERVAL 10 MINUTE ORDER BY Timestamp DESC LIMIT 15 FORMAT PrettyCompactMonoBlock"
   } >"$f" 2>&1
   cat "$f" >&2
+
+  # The js-service half, in its own file so the pre-existing one keeps measuring
+  # exactly what it measured before.
+  local jf="$EVID/live-clickhouse-${label}-js.txt"
+  {
+    echo "TraceId=$tid"
+    chq "SELECT SpanName, SpanKind, ServiceName FROM otel.otel_traces WHERE TraceId = '$tid' AND ServiceName = 'demo-js-service' ORDER BY Timestamp FORMAT PrettyCompactMonoBlock"
+    echo "js_nats_count=$js"
+    echo "js_nats_spans_cluster_wide_since_probe=$js_recent"
+    echo "--- js-service, recent 15 ---"
+    chq "SELECT substring(TraceId,1,12) AS t, SpanName, SpanKind FROM otel.otel_traces WHERE ServiceName = 'demo-js-service' AND Timestamp > now() - INTERVAL 10 MINUTE ORDER BY Timestamp DESC LIMIT 15 FORMAT PrettyCompactMonoBlock"
+  } >"$jf" 2>&1
+  cat "$jf" >&2
 }
 
 # run_case drives one flag state to convergence and records the evidence.
@@ -212,11 +268,15 @@ run_case() {
   label="$(echo "$id" | tr '[:upper:]' '[:lower:]')-${variation}"
 
   log "CASE ${id}: ConfigMap → ${variation} (expect nats ${expect})"
+  log "  propagation bounds: backend=${BACKEND_PROPAGATION_BOUND}s js-service=${JS_PROPAGATION_BOUND}s; pacing on the larger (${FLIP_BOUND}s)"
   set_flags_cm "$variation" "$label"
+  # The floor before the first probe can mean anything. Convergence still drives
+  # the loop below; this only stops attempt 1 from being noise.
+  sleep "$FLIP_BOUND"
   wait_for_relay "$variation" "$key" "$svc" || true
   relay_eval "$label" "$key" "$svc" >/dev/null
 
-  local attempt tid nats http recent since pass=false
+  local attempt tid nats http recent js js_recent since pass=false
   for (( attempt = 1; attempt <= CONVERGE_ATTEMPTS; attempt++ )); do
     since="$(ch_now)"
     tid="$(demo_trace "$label")"
@@ -224,23 +284,30 @@ run_case() {
     nats="$(nats_count_for_trace "$tid")"
     http="$(http_count_for_trace "$tid")"
     recent="$(nats_count_since "$since")"
-    log "  attempt ${attempt}/${CONVERGE_ATTEMPTS}: trace=${tid} nats=${nats} http=${http} cluster_since_probe=${recent}"
+    js="$(js_nats_count_for_trace "$tid")"
+    js_recent="$(js_nats_count_since "$since")"
+    log "  attempt ${attempt}/${CONVERGE_ATTEMPTS}: trace=${tid} nats=${nats} js_nats=${js} http=${http} cluster_since_probe=${recent} js_cluster_since_probe=${js_recent}"
 
-    if [[ "$expect" == "gt0" && "${nats:-0}" -gt 0 && "${http:-0}" -gt 0 ]]; then
+    # BOTH runtimes must satisfy the expectation. Asserting on the backend alone
+    # would let the JS half fail silently, which is precisely the claim this
+    # campaign exists to make.
+    if [[ "$expect" == "gt0" && "${nats:-0}" -gt 0 && "${js:-0}" -gt 0 && "${http:-0}" -gt 0 ]]; then
       pass=true; break
     fi
     # For the disabled case, "gone" means gone everywhere, not merely absent from
     # this trace ID — see nats_count_since.
-    if [[ "$expect" == "eq0" && "${nats:-1}" -eq 0 && "${http:-0}" -gt 0 && "${recent:-1}" -eq 0 ]]; then
+    if [[ "$expect" == "eq0" && "${nats:-1}" -eq 0 && "${js:-1}" -eq 0 && "${http:-0}" -gt 0 \
+          && "${recent:-1}" -eq 0 && "${js_recent:-1}" -eq 0 ]]; then
       pass=true; break
     fi
     sleep "$CONVERGE_SLEEP"
   done
 
-  query_spans "$label" "$tid" "$nats" "$http" "$recent"
+  query_spans "$label" "$tid" "$nats" "$http" "$recent" "${js:-0}" "${js_recent:-0}"
 
   ID="$id" TITLE="$title" LABEL="$label" PASS="$pass" TID="$tid" \
   NATS="${nats:-0}" HTTP="${http:-0}" RECENT="${recent:-0}" ATTEMPTS="$attempt" \
+  JS_NATS="${js:-0}" JS_RECENT="${js_recent:-0}" \
   EVID="$EVID" python3 - <<'PY'
 import json, os
 
@@ -274,15 +341,22 @@ case = {
         "目前 defaultRule 是 STATIC，兩者結果相同；若改用 percentage / progressiveRollout 規則，"
         "此回應就不能代表 backend 實際看到的值 — 以 ClickHouse span 數為準。"
     ),
+    # nats_count is the BACKEND's spans on this trace, as it always was. It is
+    # filtered by ServiceName so it kept that meaning when js-service arrived —
+    # see nats_count_for_trace.
     "nats_count": int(os.environ["NATS"] or 0),
+    "js_nats_count": int(os.environ["JS_NATS"] or 0),
     "http_count": int(os.environ["HTTP"] or 0),
     "nats_spans_cluster_wide_since_probe": int(os.environ["RECENT"] or 0),
+    "js_nats_spans_cluster_wide_since_probe": int(os.environ["JS_RECENT"] or 0),
     "clickhouse": read_text(f"{evid}/live-clickhouse-{label}.txt"),
+    "clickhouse_js": read_text(f"{evid}/live-clickhouse-{label}-js.txt"),
     "files": {
         "apply": f"live-configmap-apply-{label}.txt",
         "relay": f"live-relay-eval-{label}.json",
         "api": f"live-step-{label}-api.json",
         "clickhouse": f"live-clickhouse-{label}.txt",
+        "clickhouse_js": f"live-clickhouse-{label}-js.txt",
     },
 }
 with open(f"{evid}/live-case-{case['id']}.json", "w", encoding="utf-8") as fh:
@@ -311,6 +385,16 @@ SERVICE_NAME="$(kubectl -n "$NS" get deploy backend \
 SERVICE_NAME="${SERVICE_NAME:-demo-backend}"
 log "backend pod=${BACKEND_POD} service=${SERVICE_NAME} control-plane targeting key=${TARGET_KEY}"
 
+# js-service has no Service object and nothing calls it, so its pod name is only
+# needed for the baseline record — the campaigns reach it entirely through NATS.
+JS_POD="$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=js-service \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+if [[ -z "$JS_POD" ]]; then
+  log "ERROR: no js-service pod found in namespace ${NS}"
+  exit 1
+fi
+log "js-service pod=${JS_POD}"
+
 # live-baseline-env.txt is read by render-flag-matrix-html.py. It used to be a
 # committed file that no script produced, so the report's "cluster baseline"
 # block could not be regenerated from the repository — the same gap as
@@ -319,9 +403,23 @@ kubectl -n "$NS" get deploy backend \
   -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
   >"$EVID/live-baseline-env.txt"
 
+# js-service's env in its own file, so the pre-existing one keeps meaning exactly
+# "the backend's env". Both are what makes "option C" auditable rather than
+# asserted: each runtime's module switch is explicitly falsy, so spans appearing
+# at all are explicable only by the relay.
+kubectl -n "$NS" get deploy js-service \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+  >"$EVID/live-baseline-env-js.txt"
+
 {
   echo "=== backend Deployment env ==="
   cat "$EVID/live-baseline-env.txt"
+  echo
+  echo "=== js-service Deployment env ==="
+  cat "$EVID/live-baseline-env-js.txt"
+  echo
+  echo "=== propagation bounds ==="
+  echo "backend=${BACKEND_PROPAGATION_BOUND}s js-service=${JS_PROPAGATION_BOUND}s paced_on=${FLIP_BOUND}s"
   echo
   echo "=== relay-proxy volumes ==="
   kubectl -n "$NS" get deploy relay-proxy -o jsonpath='{.spec.template.spec.volumes}' | python3 -m json.tool
@@ -352,16 +450,23 @@ run_case C3 "ConfigMap → enabled：NATS span 恢復" enabled gt0 "$TARGET_KEY"
 # script that produces it cannot drift apart.
 NS="$NS" EVID="$EVID" CLUSTER="$(kubectl config current-context)" \
 BACKEND_ENV="$(kubectl -n "$NS" get deploy backend -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')" \
+JS_ENV="$(kubectl -n "$NS" get deploy js-service -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')" \
+BACKEND_BOUND="$BACKEND_PROPAGATION_BOUND" JS_BOUND="$JS_PROPAGATION_BOUND" FLIP_BOUND="$FLIP_BOUND" \
 python3 - <<'PY'
 import json, os, datetime
 
 evid = os.environ["EVID"]
 
-backend_env = {}
-for line in os.environ.get("BACKEND_ENV", "").splitlines():
-    if "=" in line:
-        k, v = line.split("=", 1)
-        backend_env[k] = v
+def parse_env(raw):
+    out = {}
+    for line in raw.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out[k] = v
+    return out
+
+backend_env = parse_env(os.environ.get("BACKEND_ENV", ""))
+js_env = parse_env(os.environ.get("JS_ENV", ""))
 
 cases = []
 for cid in ("C1", "C2", "C3"):
@@ -375,10 +480,19 @@ summary = {
     "cluster": os.environ.get("CLUSTER", ""),
     "namespace": os.environ["NS"],
     "backend_env": backend_env,
+    "js_env": js_env,
+    "propagation_bounds_seconds": {
+        "backend": int(os.environ.get("BACKEND_BOUND", "0") or 0),
+        "js_service": int(os.environ.get("JS_BOUND", "0") or 0),
+        "paced_on": int(os.environ.get("FLIP_BOUND", "0") or 0),
+    },
     "note": (
         "每個 case 都是輪詢到條件成立（或用盡重試）才記錄，不是固定 sleep。"
         "C2 額外查「本次探測開始之後」全叢集的 demo.trace span 數（每次嘗試各自取一個 ClickHouse 端時間點），"
         "用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。"
+        "每個 case 對 backend 與 js-service 兩邊都下斷言：一次 ConfigMap 翻轉必須同時管住兩種 runtime。"
+        "nats_count 只算 demo-backend 的 span（js-service 的 consumer span 是 parent-child、會落在同一條 trace 上，"
+        "不過濾會讓這個既有欄位的意義悄悄改變）；js_nats_count 是 js-service 那一半。"
     ),
     "cases": cases,
     "passed": sum(1 for c in cases if c["pass"]),
