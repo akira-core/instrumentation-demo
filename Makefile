@@ -103,12 +103,13 @@ kube-context:
 	@echo "kubectl context: $$(kubectl config current-context)"
 	@kubectl cluster-info >/dev/null
 
-# Build the two in-house service images. Build contexts differ — see the
+# Build the three in-house service images. Build contexts differ — see the
 # comment header of each Dockerfile for why. (The feature-flag relay proxy is
 # not built here: it is the upstream GO Feature Flag image, installed from its
 # vendored chart by helm-install below.)
 build-images:
 	docker build -f backend/Dockerfile -t demo-backend:local .
+	docker build -f js-service/Dockerfile -t demo-js-service:local .
 	docker build -t demo-frontend:local frontend/
 
 # Load the freshly-built images into a kind cluster (no registry needed).
@@ -117,7 +118,7 @@ kind-load: build-images
 	@name=$$($(resolve_kind_cluster)); \
 	if kind get clusters 2>/dev/null | grep -qx "$$name"; then \
 		echo "Loading images into kind cluster '$$name'..."; \
-		kind load docker-image demo-backend:local demo-frontend:local --name "$$name"; \
+		kind load docker-image demo-backend:local demo-js-service:local demo-frontend:local --name "$$name"; \
 	else \
 		echo "No kind cluster named '$$name' — skipping kind load (images must already be available to the cluster)"; \
 	fi
@@ -178,6 +179,7 @@ wait-ready: kube-context
 	@echo "Waiting for demo deployments in namespace '$(NAMESPACE)'..."
 	kubectl -n $(NAMESPACE) rollout status deployment/frontend --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/backend --timeout=300s
+	kubectl -n $(NAMESPACE) rollout status deployment/js-service --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/rotel --timeout=300s
 	kubectl -n $(NAMESPACE) rollout status deployment/grafana --timeout=300s
 	@echo "Waiting for ClickHouseInstallation clickhouse-cluster..."

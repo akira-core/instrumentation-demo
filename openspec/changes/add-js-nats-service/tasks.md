@@ -1,37 +1,37 @@
 ## 1. Submodule and workspace
 
-- [ ] 1.1 Bump the `third_party/instrumentation-js` gitlink to a commit where `add-dynamic-feature-flags` has landed, and update `.gitmodules`' tracked branch to match
-- [ ] 1.2 Add `js-service` to the root `pnpm-workspace.yaml` alongside `frontend`, and link `@akira-core/otel-nats` / `@akira-core/otel-flags` from the submodule workspace
-- [ ] 1.3 Confirm both packages build from the submodule checkout before wiring anything into the image
+- [x] 1.1 Bump the `third_party/instrumentation-js` gitlink to a commit where `add-dynamic-feature-flags` has landed, and update `.gitmodules`' tracked branch to match
+- [x] 1.2 Add `js-service` to the root `pnpm-workspace.yaml` alongside `frontend`, and link `@akira-core/otel-nats` / `@akira-core/otel-flags` from the submodule workspace
+- [x] 1.3 Confirm both packages build from the submodule checkout before wiring anything into the image
 
 ## 2. The service
 
-- [ ] 2.1 Scaffold `js-service/` (`package.json`, `tsconfig.json`, `src/`), Node 22, ESM, TypeScript compiled ahead of run
-- [ ] 2.2 Implement OTel bootstrap: `NodeTracerProvider` with an OTLP/HTTP exporter pointed at `OTEL_EXPORTER_OTLP_ENDPOINT`, resource carrying `service.name` from `OTEL_SERVICE_NAME`, W3C propagator; no sampler override, so the demo's default sampling matches the Go backend's
-- [ ] 2.3 Implement the NATS lifecycle: connect via `@akira-core/otel-nats` with retry and exponential backoff in the background, never blocking startup; pass **no** `tracingEnabled` option, mirroring `backend/internal/natsflow`'s comment about not muddying ladder verification
-- [ ] 2.4 Subscribe to `demo.trace.request` with **no** queue group; on each message log the correlation header at info and publish to `demo.trace.js`, continuing the consumed message's context
-- [ ] 2.5 Subscribe to `demo.trace.js` and log receipt, so the service exercises the consuming side of a message its own library produced
-- [ ] 2.6 Implement a minimal HTTP listener exposing a single `/healthz` that never blocks on NATS or the relay, serving both the liveness and the readiness probe — mirroring the Go backend, whose probes both key on `/healthz`
-- [ ] 2.7 Handle SIGTERM: drain the NATS connection, shut down the tracer provider, and call the flags package's shutdown so the process exits promptly
-- [ ] 2.8 Write `js-service/Dockerfile` building from the repo root (so `third_party/instrumentation-js` is in context), multi-stage, shipping `node_modules` via `pnpm deploy --prod` rather than a bundle — per design.md's WASM-loading decision
+- [x] 2.1 Scaffold `js-service/` (`package.json`, `tsconfig.json`, `src/`), Node 22, ESM, TypeScript compiled ahead of run
+- [x] 2.2 Implement OTel bootstrap: `NodeTracerProvider` with an OTLP/HTTP exporter pointed at `OTEL_EXPORTER_OTLP_ENDPOINT`, resource carrying `service.name` from `OTEL_SERVICE_NAME`, W3C propagator; no sampler override, so the demo's default sampling matches the Go backend's
+- [x] 2.3 Implement the NATS lifecycle: connect via `@akira-core/otel-nats` with retry and exponential backoff in the background, never blocking startup; pass **no** `tracingEnabled` option, mirroring `backend/internal/natsflow`'s comment about not muddying ladder verification
+- [x] 2.4 Subscribe to `demo.trace.request` with **no** queue group; on each message log the correlation header at info and publish to `demo.trace.js`, continuing the consumed message's context
+- [x] 2.5 Subscribe to `demo.trace.js` and log receipt, so the service exercises the consuming side of a message its own library produced
+- [x] 2.6 Implement a minimal HTTP listener exposing a single `/healthz` that never blocks on NATS or the relay, serving both the liveness and the readiness probe — mirroring the Go backend, whose probes both key on `/healthz`
+- [x] 2.7 Handle SIGTERM: drain the NATS connection, shut down the tracer provider, and call the flags package's shutdown so the process exits promptly
+- [x] 2.8 Write `js-service/Dockerfile` building from the repo root (so `third_party/instrumentation-js` is in context), multi-stage, shipping `node_modules` rather than a bundle — per design.md's WASM-loading decision. **`pnpm deploy` cannot be used**: it leaves a `link:` dependency pointing at the original workspace path, so the runtime image got dangling `@akira-core/*` symlinks and no `wasm-module/` at all. The whole build tree is copied instead, and both are asserted in the image
 
 ## 3. Deploy
 
-- [ ] 3.1 Write `deploy/base/js-service.yaml`: Deployment (1 replica, image `demo-js-service:local`, `imagePullPolicy: IfNotPresent`), liveness/readiness on `/healthz`, resource requests in line with the backend's
-- [ ] 3.2 Set the env block with the same option-C posture as `backend.yaml`, commented the same way: `NATS_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://rotel:4318`, `OTEL_SERVICE_NAME=demo-js-service`, `OTEL_INSTRUMENTATION_JS_TRACING_ENABLED=1`, `OTEL_NATS_TRACING_ENABLED=false`, `OTEL_INSTRUMENTATION_JS_FLAGS_ENDPOINT=http://relay-proxy:1031`, `OTEL_INSTRUMENTATION_JS_FLAGS_POLL_INTERVAL=2s`
-- [ ] 3.3 Add `js-service.yaml` to `deploy/base/kustomization.yaml`
-- [ ] 3.4 Update `deploy/base/feature-flags.yaml`'s comment block: the same `otel-nats-tracing` key now governs two runtimes, and the two propagation bounds differ. No key or variation changes
-- [ ] 3.5 Makefile: add the image to `build-images` and `kind-load`, add the rollout to `wait-ready`
-- [ ] 3.6 Verify `make deploy` on a fresh kind cluster brings all four in-house workloads to Ready
+- [x] 3.1 Write `deploy/base/js-service.yaml`: Deployment (1 replica, image `demo-js-service:local`, `imagePullPolicy: IfNotPresent`), liveness/readiness on `/healthz`, resource requests in line with the backend's
+- [x] 3.2 Set the env block with the same option-C posture as `backend.yaml`, commented the same way: `NATS_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://rotel:4318`, `OTEL_SERVICE_NAME=demo-js-service`, `OTEL_INSTRUMENTATION_JS_TRACING_ENABLED=1`, `OTEL_NATS_TRACING_ENABLED=false`, `OTEL_INSTRUMENTATION_JS_FLAGS_ENDPOINT=http://relay-proxy:1031`, `OTEL_INSTRUMENTATION_JS_FLAGS_POLL_INTERVAL=2s`
+- [x] 3.3 Add `js-service.yaml` to `deploy/base/kustomization.yaml`
+- [x] 3.4 Update `deploy/base/feature-flags.yaml`'s comment block: the same `otel-nats-tracing` key now governs two runtimes, and the two propagation bounds differ. No key or variation changes
+- [x] 3.5 Makefile: add the image to `build-images` and `kind-load`, add the rollout to `wait-ready`
+- [x] 3.6 Verify `make deploy` on a fresh kind cluster brings all four in-house workloads to Ready
 
 ## 4. Verification in the cluster
 
-- [ ] 4.1 Happy path: issue a demo request, confirm the Go round trip completes unchanged and both services' NATS spans are queryable in ClickHouse
-- [ ] 4.2 Confirm the Go backend's span counts for a single request match the pre-change evidence, proving the ungrouped JS subscription stole nothing
-- [ ] 4.3 Confirm the JS consumer span is a root carrying a link to the Go producer's span context, not a child of it
-- [ ] 4.4 Flip the ConfigMap to `disabled`; after both propagation bounds, confirm both runtimes emit no NATS spans, the demo request still succeeds, and the JS service still logs a consumed message
-- [ ] 4.5 Flip back to `enabled`; confirm both runtimes resume
-- [ ] 4.6 Confirm neither pod's restart count changed across both flips
+- [x] 4.1 Happy path: issue a demo request, confirm the Go round trip completes unchanged and both services' NATS spans are queryable in ClickHouse
+- [x] 4.2 Confirm the Go backend's span counts for a single request match the pre-change evidence, proving the ungrouped JS subscription stole nothing
+- [x] 4.3 Confirm how the JS consumer span connects to the Go producer's. **Measured: it is a CHILD of the extracted remote context, not a root-with-link.** `@akira-core/otel-nats` parents its consumer span on the extracted context while `instrumentation-go` uses a span link, so one message yields a JS consumer on the producer's trace and a Go consumer on its own. spec.md's requirement was corrected to describe this
+- [x] 4.4 Flip the ConfigMap to `disabled`; after both propagation bounds, confirm both runtimes emit no NATS spans, the demo request still succeeds, and the JS service still logs a consumed message
+- [x] 4.5 Flip back to `enabled`; confirm both runtimes resume
+- [x] 4.6 Confirm neither pod's restart count changed across both flips
 - [ ] 4.7 Confirm the JS service stays Ready with the relay scaled to zero, and recovers when it returns
 
 ## 5. Evidence and reporting

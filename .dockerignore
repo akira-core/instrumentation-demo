@@ -1,0 +1,15 @@
+# Root build context, shared by backend/Dockerfile and js-service/Dockerfile.
+#
+# node_modules must never be copied in: pnpm's store layout is full of absolute
+# symlinks into the host's store, so a copied tree is both wrong inside the image
+# and refuses to be replaced (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
+# Build outputs are excluded for the same reason a stale one is worse than none.
+**/node_modules
+**/dist
+**/.pnpm-store
+
+# Nothing here affects an image, and copying it only invalidates layer caches.
+.git
+**/.DS_Store
+docs/evidence
+*.log

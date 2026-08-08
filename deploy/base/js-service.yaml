@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: js-service
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: js-service
+    app.kubernetes.io/part-of: demo-trace-propagation-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: js-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: js-service
+        app.kubernetes.io/part-of: demo-trace-propagation-stack
+    spec:
+      containers:
+        - name: js-service
+          image: demo-js-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8081"
+            - name: NATS_URL
+              value: "nats://nats:4222"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://rotel:4318"
+            # Also the serviceName targeting attribute @akira-core/otel-flags
+            # supplies on every flag evaluation, so a relay rule can target this
+            # service specifically. Write such rules against `serviceName`, not
+            # `service.name` — a dot is a nested-path separator in both of the
+            # relay's query languages.
+            - name: OTEL_SERVICE_NAME
+              value: "demo-js-service"
+            # ---- The feature-switch ladder: relay > env > option > default ----
+            #
+            # Same "option C" posture as deploy/base/backend.yaml, so the two
+            # runtimes are compared on identical terms.
+            #
+            # The master veto, left open. It defaults to true, so this line
+            # changes nothing on its own; it is here to make the posture explicit
+            # next to the module switch below.
+            - name: OTEL_INSTRUMENTATION_JS_TRACING_ENABLED
+              value: "1"
+            # This module's env rung — explicit false, so the happy path proves a
+            # relay ENABLE. Unset would also be "no opinion" (default false); the
+            # explicit value is what makes the intent readable in `kubectl get`.
+            #
+            # The variable is spelled identically for the Go backend, because it
+            # names the module rather than the runtime.
+            - name: OTEL_NATS_TRACING_ENABLED
+              value: "false"
+            # Relay proxy URL. Setting this is the WHOLE of the wiring: the
+            # library builds its own OpenFeature provider from it, and js-service
+            # contains no flag-related code at all.
+            - name: OTEL_INSTRUMENTATION_JS_FLAGS_ENDPOINT
+              value: "http://relay-proxy:1031"
+            # How often that provider polls the relay. A Go-style duration string,
+            # deliberately the same shape the Go backend's variable takes — a bare
+            # integer is rejected rather than read as milliseconds.
+            - name: OTEL_INSTRUMENTATION_JS_FLAGS_POLL_INTERVAL
+              value: "2s"
+            # OTEL_INSTRUMENTATION_JS_FLAGS_REFRESH_INTERVAL is deliberately
+            # UNSET, so it defaults to the poll interval above. It has no Go
+            # counterpart: OpenFeature JS evaluation is async while the wrapper's
+            # publish is sync, so the ladder is resolved against a snapshot that
+            # this interval refreshes. It is why this service's propagation bound
+            # is one hop longer than the backend's — see README.md.
+          # NATS connects asynchronously with retry/backoff and /healthz never
+          # blocks on it, so readiness and liveness can both key on the same
+          # endpoint. That is not merely convenient: if readiness depended on the
+          # relay, flipping otel-nats-tracing could restart this pod, and a
+          # restart would destroy the one thing this service exists to prove.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+---
+# No Service object.
+#
+# Nothing calls this service: it is a messaging participant, reached only over
+# NATS, and its /healthz exists for the kubelet rather than for a caller. Adding
+# one would suggest an HTTP surface the demo deliberately does not have.

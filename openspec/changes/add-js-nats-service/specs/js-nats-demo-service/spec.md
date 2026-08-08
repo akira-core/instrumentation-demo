@@ -77,15 +77,25 @@ Editing the single NATS tracing flag in the Kubernetes configuration source SHAL
 - **THEN** the same single NATS tracing key governs both runtimes, with no JS-specific module key added
 
 ### Requirement: Trace context propagates across the language boundary
-Trace context carried in NATS message headers SHALL be extracted by the JS consumer, and the resulting consumer span SHALL be linked to the producing span rather than parented to it.
+Trace context carried in NATS message headers SHALL be extracted by the JS consumer and applied to its consumer span, so a flow that crosses from the Go backend into the JS service is connected in the trace backend.
 
-#### Scenario: JS consumer span links to the Go producer span
+The two runtimes connect it differently, and the demo SHALL surface that rather than hide it: `instrumentation-go`'s consumer span is a ROOT joined to its producer by a span LINK, while `@akira-core/otel-nats`'s consumer span is a CHILD of the extracted remote context. One published message therefore produces a Go consumer on its own trace and a JS consumer on the producer's trace.
+
+#### Scenario: JS consumer continues the Go producer's trace
 - **WHEN** the JS service consumes a message the Go backend published while both are tracing
-- **THEN** the JS consumer span is a root on its own trace carrying a span link to the Go producer's span context
+- **THEN** the JS consumer span carries the producer's trace id, so the Go publish and the JS consume are queryable as one trace
+
+#### Scenario: Go consumer of the same message stays on its own trace
+- **WHEN** the Go backend's own subscriber consumes that same message
+- **THEN** its consumer span is a root on a different trace, linked to the producer, unchanged by the JS service's presence
 
 #### Scenario: JS producer span propagates to the JS consumer
 - **WHEN** the JS service publishes on its own subject and consumes that message
-- **THEN** the consuming span carries a link to the publishing span, demonstrating propagation through headers the JS library both wrote and read
+- **THEN** the consuming span carries the publishing span's trace, demonstrating propagation through headers the JS library both wrote and read
+
+#### Scenario: The divergence is documented rather than implied
+- **WHEN** a reader consults the demo's documentation about NATS span topology
+- **THEN** it states that span links apply to the Go path and parent-child to the JS path, so a reader comparing the two in the trace backend is not left to infer that one of them is broken
 
 ### Requirement: Readiness is independent of NATS and the relay
 The JS service's liveness and readiness SHALL NOT depend on the NATS connection or on the feature-flag relay, so a flag flip or a messaging outage never restarts it.
