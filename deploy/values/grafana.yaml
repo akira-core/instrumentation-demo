@@ -12,11 +12,13 @@
 #   admin login still available: admin / demo-grafana-admin
 #
 # ClickHouse connection used below MUST match deploy/values/clickhouse.yaml's
-# defaultUser password and the pinned client Service name:
+# read-only `reporter` user and the pinned client Service name:
 #   host: clickhouse (cluster.clickhouse.service.name in deploy/values/clickhouse.yaml)
 #   port: 8123 (HTTP interface — same interface rotel's exporter writes through)
-#   username: default
-#   password: demo-clickhouse-pw
+#   username: reporter (readonly profile, GRANT SELECT ON otel.* — provisioned
+#     via extraUsersConfig in deploy/values/clickhouse.yaml)
+#   password: demo-clickhouse-reporter-pw (Secret clickhouse-reporter, created
+#     by `make helm-install`)
 #   database: otel / table: otel_traces (rotel's default database + table-prefix,
 #     schema created by the chart's rotel-ddl Job)
 #
@@ -94,7 +96,10 @@ datasources:
           port: 8123
           protocol: http
           defaultDatabase: otel
-          username: default
+          # Read-only account (profile readonly, GRANT SELECT ON otel.* only) —
+          # provisioned by the clickhouse chart via extraUsersConfig in
+          # deploy/values/clickhouse.yaml.
+          username: reporter
           # Single-table trace mode tells the plugin how to map rotel's
           # (community OTel-collector-compatible) `otel_traces` table columns
           # into Grafana's native trace/span model, and lets it use the
@@ -125,7 +130,7 @@ datasources:
             traceTimestampTableSuffix: _trace_id_ts
             otelEnabled: false
         secureJsonData:
-          password: demo-clickhouse-pw
+          password: demo-clickhouse-reporter-pw
 
       ## VictoriaMetrics for metrics. Grafana's built-in `prometheus` type is
       ## used deliberately: VictoriaMetrics serves the Prometheus query API, so

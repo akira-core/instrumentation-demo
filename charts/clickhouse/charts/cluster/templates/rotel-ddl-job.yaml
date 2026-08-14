@@ -67,6 +67,35 @@ spec:
                 sleep 5
               done
 
+              {{- if .Values.rotel.exporter.cluster }}
+              # The operator brings hosts up one at a time, and each host's view
+              # of remote_servers converges on its own schedule (ConfigMap sync +
+              # config reload). ON CLUSTER only reaches the members the
+              # coordinating host sees at that moment — and the client Service
+              # round-robins, so a "cluster is complete" pre-check against one
+              # host says nothing about the host that ends up coordinating the
+              # CREATE. A replica the CREATE never reached stays empty forever
+              # under a Replicated database (it never joins the DDL log).
+              #
+              # So converge instead of pre-checking: re-run the idempotent CREATE
+              # until the database exists on every host the chart deployed.
+              {{- if eq .Values.rotel.exporter.cluster .Values.clickhouse.clusterName }}
+              EXPECTED={{ mul (int .Values.clickhouse.shards) (int .Values.clickhouse.replicas) }}
+              {{- else }}
+              # External cluster: best effort — take the member count the cluster
+              # itself reports (same source the TTL job verifies against).
+              EXPECTED=$(ch "SELECT uniqExact(host_name) FROM system.clusters WHERE cluster = '{{ .Values.rotel.exporter.cluster }}'")
+              {{- end }}
+              HAVE_HOSTS=""
+              until HAVE_HOSTS=$(ch "SELECT countDistinct(hostName()) FROM clusterAllReplicas('{{ .Values.rotel.exporter.cluster }}', system.databases) WHERE name = '$DB'" 2>/dev/null) \
+                    && [ "$HAVE_HOSTS" = "$EXPECTED" ]; do
+                echo "database $DB present on ${HAVE_HOSTS:-?}/$EXPECTED hosts; re-running CREATE in 5s"
+                sleep 5
+                ch "$QUERY" || true
+              done
+              echo "database $DB present on all $EXPECTED hosts"
+              {{- end }}
+
               # CREATE DATABASE IF NOT EXISTS keeps whatever engine the database
               # already has, so a value change would otherwise apply silently to
               # nothing. An engine cannot be swapped in place — the README has

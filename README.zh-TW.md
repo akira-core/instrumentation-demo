@@ -179,7 +179,7 @@ demo 連線**不要**呼叫 `otelnats.WithTracingEnabled(...)`，讓 option 那�
 - `frontend/` — 瀏覽器應用；開啟 trace 並呼叫後端。
 - `backend/` — Go HTTP 服務；延續 trace、NATS 發布／訂閱。沒有任何功能開關程式碼：`otelnats` 依環境變數自行接到 relay。
 - `deploy/` — `kind` 叢集設定、in-house 服務的 Kustomize base、vendored chart 的 Helm values。
-- `charts/` — 第三方 Helm charts（NATS、Altinity operator 傘狀 ClickHouse、Grafana、VictoriaMetrics、GO Feature Flag relay proxy）。各子目錄有 `SOURCE.txt` 記錄拉取版本。
+- `charts/` — Helm charts（NATS、Altinity operator 傘狀 ClickHouse、Grafana、VictoriaMetrics、GO Feature Flag relay proxy）。`charts/clickhouse` 由本 repo 維護；其餘 vendored chart 各有 `SOURCE.txt` 記錄拉取版本。
 - `deploy/loadgen/` — 按需負載 Job，不在預設 `deploy` 路徑內。
 - `third_party/` — 兄弟 instrumentation 倉庫的 git submodule
   （`instrumentation-js`、`instrumentation-go`）。

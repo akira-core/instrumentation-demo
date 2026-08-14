@@ -197,10 +197,10 @@ is a legal third rung in the library; this demo simply does not use it.)
   from the environment.
 - `deploy/` — `kind` cluster config, Kustomize base for the in-house
   services, and Helm values for the vendored charts.
-- `charts/` — vendored third-party Helm charts (NATS, ClickHouse via the
-  Altinity operator umbrella, Grafana, VictoriaMetrics, and the GO Feature Flag
-  relay proxy). Each subdirectory has a `SOURCE.txt` recording the exact chart
-  version pulled.
+- `charts/` — Helm charts (NATS, ClickHouse via the Altinity operator
+  umbrella, Grafana, VictoriaMetrics, and the GO Feature Flag relay proxy).
+  `charts/clickhouse` is maintained in this repo; the other vendored charts
+  keep a `SOURCE.txt` recording the exact chart version pulled.
 - `deploy/loadgen/` — on-demand load-generator Job, deliberately outside the
   default deploy path.
 - `third_party/` — git submodules for the sibling instrumentation repos

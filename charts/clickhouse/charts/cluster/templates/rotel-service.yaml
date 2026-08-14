@@ -6,11 +6,10 @@ metadata:
   labels:
     {{- include "cluster.labels" . | nindent 4 }}
     app.kubernetes.io/component: rotel
-  {{- /* Chart-owned keys are the merge destination, so they win a collision
-         with rotel.service.annotations. */}}
-  {{- $svcAnnotations := merge (include "cluster.argocdAnnotations" "rotel" | fromYaml) (.Values.rotel.service.annotations | default dict) }}
+  {{- with .Values.rotel.service.annotations }}
   annotations:
-    {{- toYaml $svcAnnotations | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.rotel.service.type }}
   selector:

@@ -1,11 +1,11 @@
 apiVersion: v2
 name: cluster
 description: >
-  Deploys production ClickHouseKeeperInstallation (CHK) and a replicated
+  Deploys a ClickHouseKeeperInstallation (CHK) and a replicated
   ClickHouseInstallation (CHI) using the Altinity ClickHouse Operator CRDs
   (clickhouse.altinity.com/v1, clickhouse-keeper.altinity.com/v1).
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "26.7.1.1315"
 keywords:
   - clickhouse

@@ -18,11 +18,10 @@ metadata:
     {{- with include "cluster.stringMap" .Values.clickhouse.labels }}
     {{- . | nindent 4 }}
     {{- end }}
+  {{- with include "cluster.stringMap" .Values.clickhouse.annotations }}
   annotations:
-    {{- include "cluster.argocdAnnotations" "clickhouse" | nindent 4 }}
-    {{- with include "cluster.stringMap" .Values.clickhouse.annotations }}
     {{- . | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
   defaults:
     templates:
@@ -139,9 +138,10 @@ spec:
           labels:
             {{- include "cluster.labels" . | nindent 12 }}
             app.kubernetes.io/component: clickhouse
-          {{- $svcAnnotations := merge (include "cluster.argocdAnnotations" "clickhouse-service" | fromYaml) (.Values.clickhouse.service.annotations | default dict) }}
+          {{- with .Values.clickhouse.service.annotations }}
           annotations:
-            {{- toYaml $svcAnnotations | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         spec:
           type: ClusterIP
           {{- with .Values.clickhouse.service.sessionAffinity }}
@@ -166,26 +166,11 @@ spec:
         - "::/0"
       default/access_management: "1"
       default/named_collection_control: "1"
-      {{- $pwType := .Values.clickhouse.defaultUser.passwordType | default "password" }}
-      {{- if eq $pwType "password_sha256_hex" }}
-      default/password_sha256_hex:
-        valueFrom:
-          secretKeyRef:
-            name: {{ include "cluster.passwordSecretName" . | quote }}
-            key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
-      {{- else if eq $pwType "password_double_sha1_hex" }}
-      default/password_double_sha1_hex:
-        valueFrom:
-          secretKeyRef:
-            name: {{ include "cluster.passwordSecretName" . | quote }}
-            key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
-      {{- else }}
       default/password:
         valueFrom:
           secretKeyRef:
             name: {{ include "cluster.passwordSecretName" . | quote }}
             key: {{ .Values.clickhouse.defaultUser.existingSecretKey | default "password" | quote }}
-      {{- end }}
       {{- /* Extra users: Altinity flat keys, or nested map converted below */}}
       {{- include "cluster.altinityUsers" . | nindent 6 }}
     {{- /* ---- profiles ---- */}}

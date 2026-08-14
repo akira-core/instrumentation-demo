@@ -1,5 +1,7 @@
+annotations:
+  artifacthub.io/license: Apache-2.0
 apiVersion: v2
-appVersion: 0.27.2
+appVersion: 0.27.3
 description: 'Helm chart to deploy [altinity-clickhouse-operator](https://github.com/Altinity/clickhouse-operator).  The
   ClickHouse Operator creates, configures and manages ClickHouse clusters running
   on Kubernetes.  ## CRD Management  CRDs are automatically installed and updated
@@ -17,5 +19,7 @@ maintainers:
 - email: support@altinity.com
   name: altinity
 name: altinity-clickhouse-operator
+sources:
+- https://github.com/Altinity/clickhouse-operator
 type: application
-version: 0.27.2
+version: 0.27.3

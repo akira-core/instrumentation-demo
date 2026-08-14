@@ -24,9 +24,8 @@ Cluster
     kubectl get chk,chi -n {{ .Release.Namespace }}
     kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
 
-  Default user password Secret:
-    kubectl get secret -n {{ .Release.Namespace }} {{ .Release.Name }}-cluster-default-password 2>/dev/null \
-      || kubectl get secret -n {{ .Release.Namespace }} -l app.kubernetes.io/component=clickhouse
+  Default user password Secret (pre-created, see README):
+    kubectl get secret -n {{ .Release.Namespace }} {{ .Values.cluster.clickhouse.defaultUser.existingSecret }}
 
   Connect (in-cluster):
     kubectl exec -it -n {{ .Release.Namespace }} \
@@ -45,7 +44,7 @@ Cluster
 {{- end }}
 
 Sizing (this profile)
-  Workload class : small-business production (override with values-local.yaml for kind)
+  Workload class : minimal HA (fits a single-node cluster; scale up for production)
   Keeper         : {{ .Values.cluster.keeper.replicas }} × ({{ .Values.cluster.keeper.resources.requests.cpu }}–{{ .Values.cluster.keeper.resources.limits.cpu }} CPU, {{ .Values.cluster.keeper.resources.requests.memory }}–{{ .Values.cluster.keeper.resources.limits.memory }} RAM, {{ .Values.cluster.keeper.persistence.size }} disk)
   ClickHouse     : {{ .Values.cluster.clickhouse.replicas }} × ({{ .Values.cluster.clickhouse.resources.requests.cpu }}–{{ .Values.cluster.clickhouse.resources.limits.cpu }} CPU, {{ .Values.cluster.clickhouse.resources.requests.memory }}–{{ .Values.cluster.clickhouse.resources.limits.memory }} RAM, {{ .Values.cluster.clickhouse.persistence.size }} disk), {{ .Values.cluster.clickhouse.shards }} shard
 

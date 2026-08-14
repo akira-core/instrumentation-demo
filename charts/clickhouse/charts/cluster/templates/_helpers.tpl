@@ -12,9 +12,9 @@ immutable and an upgrade that changes it is rejected outright.
 {{/*
 Create a default fully qualified app name.
 
-Base name for CHI/CHK CRs, rotel Deployment/Service/Jobs, and the generated
-password Secret. Official Altinity examples often give CHI and CHK matching
-names; the chart does the same by default.
+Base name for CHI/CHK CRs and the rotel Deployment/Service/Jobs. Official
+Altinity examples often give CHI and CHK matching names; the chart does the
+same by default.
 */}}
 {{- define "cluster.fullname" -}}
 {{- if .Values.fullnameOverride }}
@@ -74,33 +74,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Default user password secret name
+Name of the pre-created Secret holding the default user's password.
+The chart never creates this Secret — see the README install steps.
 */}}
 {{- define "cluster.passwordSecretName" -}}
-{{- if .Values.clickhouse.defaultUser.existingSecret }}
+{{- if not .Values.clickhouse.defaultUser.existingSecret }}
+{{- fail "clickhouse.defaultUser.existingSecret is required — create a Secret with the default user's password (kubectl create secret generic clickhouse-default-user --from-literal=password='...') and set its name here" }}
+{{- end }}
 {{- .Values.clickhouse.defaultUser.existingSecret }}
-{{- else }}
-{{- printf "%s-default-password" (include "cluster.clickhouseName" .) }}
-{{- end }}
-{{- end }}
-
-{{/*
-TLS certificate secret names
-*/}}
-{{- define "cluster.clickhouseTlsSecretName" -}}
-{{- if and .Values.tls.enabled .Values.tls.clickhouse.existingSecret }}
-{{- .Values.tls.clickhouse.existingSecret }}
-{{- else }}
-{{- printf "%s-clickhouse-tls" (include "cluster.clickhouseName" .) }}
-{{- end }}
-{{- end }}
-
-{{- define "cluster.keeperTlsSecretName" -}}
-{{- if and .Values.tls.enabled .Values.tls.keeper.existingSecret }}
-{{- .Values.tls.keeper.existingSecret }}
-{{- else }}
-{{- printf "%s-keeper-tls" (include "cluster.keeperName" .) }}
-{{- end }}
 {{- end }}
 
 {{/*
@@ -483,25 +464,4 @@ rotel.exporter.ttl as a whole number of seconds.
 {{- else if eq $unit "d" -}}{{- $n = mul $n 86400 -}}
 {{- end -}}
 {{- $n -}}
-{{- end }}
-
-{{/*
-ArgoCD sync-wave annotations, per component.
-
-  1  certs
-  2  keeper
-  3  clickhouse (+ client service via CHI serviceTemplate)
-  4  rotel
-
-Usage: include "cluster.argocdAnnotations" "keeper"
-*/}}
-{{- define "cluster.argocdAnnotations" -}}
-{{- $waves := dict "certs" 1 "keeper" 2 "pvc" 2 "clickhouse" 3 "clickhouse-service" 3 "rotel" 4 -}}
-{{- if not (hasKey $waves .) }}
-{{- fail (printf "cluster.argocdAnnotations: unknown component %q — expected one of %v" . (keys $waves | sortAlpha)) }}
-{{- end -}}
-argocd.argoproj.io/sync-wave: {{ index $waves . | quote }}
-{{- if has . (list "certs" "keeper" "clickhouse") }}
-argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-{{- end }}
 {{- end }}

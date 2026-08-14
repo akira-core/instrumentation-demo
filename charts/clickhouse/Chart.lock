@@ -1,9 +1,9 @@
 dependencies:
 - name: altinity-clickhouse-operator
   repository: file://charts/altinity-clickhouse-operator
-  version: 0.27.2
+  version: 0.27.3
 - name: cluster
   repository: file://charts/cluster
-  version: 0.2.0
-digest: sha256:74c0b9fe6a655a8d9eb129fd5a8881bcdc4ef6c3ffd2e3cf13a94fd3282c36d3
-generated: "2026-07-31T04:19:29.062476+08:00"
+  version: 0.3.0
+digest: sha256:e0ce4a888b11650cb8f218805184a4ce5b59a477c624c2257465290843dde4fc
+generated: "2026-08-14T19:55:57.407675+08:00"
