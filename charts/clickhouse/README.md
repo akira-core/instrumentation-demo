@@ -67,17 +67,12 @@ kubectl create secret generic clickhouse-default-user \
 Different Secret name or key? Set `cluster.clickhouse.defaultUser.existingSecret`
 / `existingSecretKey` at install time.
 
-### 3. Build chart dependencies
+### 3. Install
 
-The operator subchart and the local `cluster` subchart are vendored under
-`charts/`; this just packages them so Helm can resolve the dependency graph
-(no network access needed):
-
-```bash
-helm dependency build .
-```
-
-### 4. Install
+Both subcharts (the Altinity operator and the local `cluster` chart) are
+vendored as unpacked directories under `charts/`, so there is no
+`helm dependency build` step and no network access needed — install straight
+from the checkout:
 
 ```bash
 helm upgrade --install clickhouse . -n "$NS" --timeout 15m
@@ -94,7 +89,22 @@ before running DDL (otherwise a replica that comes up late would miss the
 provisioning can push the whole bring-up past helm's default 5-minute hook
 wait.
 
-### 5. Wait for the cluster to come up
+Why one release works despite the internal dependencies — ordering is
+layered, none of it manual:
+
+1. **CRDs before CRs** — the operator subchart's `crdHook` is a
+   `pre-install` hook Job; helm finishes it before applying any manifest,
+   so the CHI/CHK custom resources always find their CRDs registered.
+2. **Operator vs CRs** — declarative: if the CRs land before the operator
+   is Ready, they simply wait in etcd until its reconcile loop picks them
+   up.
+3. **Keeper vs ClickHouse** — the operator wires the CHI to the CHK;
+   ClickHouse pods restart until the Keeper quorum answers.
+4. **Schema last** — the DDL and TTL Jobs are `post-install` hooks
+   (weights 1 and 2) that poll until ClickHouse is up and every replica
+   has joined the cluster before creating the otel database and tables.
+
+### 4. Wait for the cluster to come up
 
 ```bash
 # CRDs registered
@@ -111,7 +121,7 @@ First install pulls images and provisions PVCs; expect a few minutes. The
 post-install DDL Job (`clickhouse-cluster-rotel-ddl`) retries until ClickHouse
 answers, then creates the `otel` database and tables.
 
-### 6. Verify
+### 5. Verify
 
 ```bash
 # All pods Running/Completed
@@ -148,7 +158,7 @@ kubectl run ch-client --rm -it --restart=Never -n "$NS" \
     --query "SELECT count() FROM otel.otel_traces"
 ```
 
-### 7. Connect applications
+### 6. Connect applications
 
 In-cluster endpoints (release name `clickhouse`):
 
