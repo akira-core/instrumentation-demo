@@ -1,29 +1,26 @@
-TraceId=1917af3e64b015ccec43f86dd1e0e5ba
-   ┌─SpanName───────────────────┬─SpanKind─┬─ServiceName─────┐
-1. │ POST /api/demo-trace       │ Server   │ demo-backend    │
-2. │ send demo.trace.request    │ Producer │ demo-backend    │
-3. │ process demo.trace.request │ Consumer │ demo-js-service │
-4. │ publish demo.trace.js      │ Producer │ demo-js-service │
-5. │ process demo.trace.js      │ Consumer │ demo-js-service │
-   └────────────────────────────┴──────────┴─────────────────┘
+TraceId=8e30522586633b9c2e0357376ff4c4d2
+   ┌─SpanName───────────────────┬─SpanKind─┬─ServiceName──┐
+1. │ POST /api/demo-trace       │ Server   │ demo-backend │
+2. │ publish demo.trace.request │ Producer │ demo-backend │
+   └────────────────────────────┴──────────┴──────────────┘
 nats_count=1
 http_count=1
 nats_spans_cluster_wide_since_probe=7
 --- recent 15 ---
     ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
- 1. │ b55189f59c72 │ process demo.trace.reply   │ Consumer │
- 2. │ 246ffe198c41 │ send demo.trace.reply      │ Producer │
- 3. │ 1917af3e64b0 │ process demo.trace.js      │ Consumer │
- 4. │ 1917af3e64b0 │ process demo.trace.request │ Consumer │
- 5. │ 1917af3e64b0 │ publish demo.trace.js      │ Producer │
- 6. │ 246ffe198c41 │ process demo.trace.request │ Consumer │
- 7. │ 1917af3e64b0 │ send demo.trace.request    │ Producer │
- 8. │ 07d365869cc8 │ HTTP POST                  │ Client   │
- 9. │ 1917af3e64b0 │ POST /api/demo-trace       │ Server   │
-10. │ 15e2999e7680 │ process demo.trace.js      │ Consumer │
-11. │ 15e2999e7680 │ publish demo.trace.js      │ Producer │
-12. │ 15e2999e7680 │ process demo.trace.request │ Consumer │
-13. │ 44fc711382e1 │ HTTP POST                  │ Client   │
-14. │ e29ba4c53dad │ POST /api/demo-trace       │ Server   │
-15. │ f17e02ccebeb │ process demo.trace.reply   │ Consumer │
+ 1. │ b9317f3daf91 │ process demo.trace.reply   │ Consumer │
+ 2. │ 339ebd8a42c8 │ publish demo.trace.reply   │ Producer │
+ 3. │ b4fdd2187010 │ process demo.trace.js      │ Consumer │
+ 4. │ 950ad7f28873 │ process demo.trace.request │ Consumer │
+ 5. │ 950ad7f28873 │ publish demo.trace.js      │ Producer │
+ 6. │ 339ebd8a42c8 │ process demo.trace.request │ Consumer │
+ 7. │ 8e3052258663 │ publish demo.trace.request │ Producer │
+ 8. │ 8e3052258663 │ POST /api/demo-trace       │ Server   │
+ 9. │ d3a49d0bbff0 │ process demo.trace.reply   │ Consumer │
+10. │ a97f02accdf1 │ publish demo.trace.reply   │ Producer │
+11. │ 6ec63cde8da4 │ process demo.trace.js      │ Consumer │
+12. │ 1b086c3601f4 │ publish demo.trace.js      │ Producer │
+13. │ a97f02accdf1 │ process demo.trace.request │ Consumer │
+14. │ 1b086c3601f4 │ process demo.trace.request │ Consumer │
+15. │ 3877d204f03a │ publish demo.trace.request │ Producer │
     └──────────────┴────────────────────────────┴──────────┘

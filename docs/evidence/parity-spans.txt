@@ -1,0 +1,19 @@
+traceId=3877d204f03a94ba1318ddac8e266c7b
+
+--- every span on the publisher's trace ---
+   ┌─ServiceName──┬─SpanName───────────────────┬─SpanKind─┬─span─────┬─parent───┬─links─┐
+1. │ demo-backend │ POST /api/demo-trace       │ Server   │ 09c11dd5 │          │     0 │
+2. │ demo-backend │ publish demo.trace.request │ Producer │ e21c8b63 │ 09c11dd5 │     0 │
+   └──────────────┴────────────────────────────┴──────────┴──────────┴──────────┴───────┘
+
+--- both consumer spans, reached through their producer link (each on its own trace) ---
+   ┌─ServiceName─────┬─SpanName───────────────────┬─SpanKind─┬─trace──────┬─span─────┬─parent─┬─link_spans───┐
+1. │ demo-backend    │ process demo.trace.request │ Consumer │ a97f02accd │ 78d08ee1 │        │ ['e21c8b63'] │
+2. │ demo-js-service │ process demo.trace.request │ Consumer │ 1b086c3601 │ 1cd8b186 │        │ ['e21c8b63'] │
+   └─────────────────┴────────────────────────────┴──────────┴────────────┴──────────┴────────┴──────────────┘
+
+--- the js-service self-loop, on the JS consumer's new trace ---
+   ┌─ServiceName─────┬─SpanName───────────────────┬─SpanKind─┬─trace──────┬─span─────┬─parent───┬─links─┐
+1. │ demo-js-service │ process demo.trace.request │ Consumer │ 1b086c3601 │ 1cd8b186 │          │     1 │
+2. │ demo-js-service │ publish demo.trace.js      │ Producer │ 1b086c3601 │ 7b1f2bec │ 1cd8b186 │     0 │
+   └─────────────────┴────────────────────────────┴──────────┴────────────┴──────────┴──────────┴───────┘

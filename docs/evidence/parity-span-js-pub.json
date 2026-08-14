@@ -1,0 +1,22 @@
+{
+  "ServiceName": "demo-js-service",
+  "SpanName": "publish demo.trace.js",
+  "SpanKind": "Producer",
+  "TraceId": "1b086c3601f4380c88ac4524058f3719",
+  "SpanId": "7b1f2bec8ee9ffe0",
+  "ParentSpanId": "1cd8b1861c9e2418",
+  "attr_keys": [
+    "messaging.destination.name",
+    "messaging.message.body.size",
+    "messaging.operation.name",
+    "messaging.operation.type",
+    "messaging.system",
+    "server.address"
+  ],
+  "m_system": "nats",
+  "m_op_name": "publish",
+  "m_op_type": "send",
+  "m_dest": "demo.trace.js",
+  "link_span_ids": [],
+  "link_trace_ids": []
+}

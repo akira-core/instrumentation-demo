@@ -1,15 +1,21 @@
-TraceId=2a6d35a82a12a552e4dac96ed6e4558d
+TraceId=aaa7d72f9348847a0c4061866906d2a6
 js_nats_count=0
 js_nats_spans_cluster_wide_since_probe=0
 --- js-service, recent 15 ---
-   ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
-1. │ 1917af3e64b0 │ process demo.trace.js      │ Consumer │
-2. │ 1917af3e64b0 │ process demo.trace.request │ Consumer │
-3. │ 1917af3e64b0 │ publish demo.trace.js      │ Producer │
-4. │ 15e2999e7680 │ process demo.trace.js      │ Consumer │
-5. │ 15e2999e7680 │ publish demo.trace.js      │ Producer │
-6. │ 15e2999e7680 │ process demo.trace.request │ Consumer │
-7. │ fb07bd739c06 │ process demo.trace.js      │ Consumer │
-8. │ fb07bd739c06 │ process demo.trace.request │ Consumer │
-9. │ fb07bd739c06 │ publish demo.trace.js      │ Producer │
-   └──────────────┴────────────────────────────┴──────────┘
+    ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
+ 1. │ b4fdd2187010 │ process demo.trace.js      │ Consumer │
+ 2. │ 950ad7f28873 │ process demo.trace.request │ Consumer │
+ 3. │ 950ad7f28873 │ publish demo.trace.js      │ Producer │
+ 4. │ 6ec63cde8da4 │ process demo.trace.js      │ Consumer │
+ 5. │ 1b086c3601f4 │ publish demo.trace.js      │ Producer │
+ 6. │ 1b086c3601f4 │ process demo.trace.request │ Consumer │
+ 7. │ 117d27b638b9 │ process demo.trace.js      │ Consumer │
+ 8. │ 1ea42bf1ae4d │ publish demo.trace.js      │ Producer │
+ 9. │ 1ea42bf1ae4d │ process demo.trace.request │ Consumer │
+10. │ e0cc3dacc63b │ process demo.trace.js      │ Consumer │
+11. │ 7698f684677a │ publish demo.trace.js      │ Producer │
+12. │ 7698f684677a │ process demo.trace.request │ Consumer │
+13. │ c631d840b779 │ process demo.trace.js      │ Consumer │
+14. │ 02edb8cdd15d │ publish demo.trace.js      │ Producer │
+15. │ 02edb8cdd15d │ process demo.trace.request │ Consumer │
+    └──────────────┴────────────────────────────┴──────────┘

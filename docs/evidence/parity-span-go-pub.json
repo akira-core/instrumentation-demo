@@ -1,0 +1,22 @@
+{
+  "ServiceName": "demo-backend",
+  "SpanName": "publish demo.trace.request",
+  "SpanKind": "Producer",
+  "TraceId": "3877d204f03a94ba1318ddac8e266c7b",
+  "SpanId": "e21c8b6377865186",
+  "ParentSpanId": "09c11dd502059f8f",
+  "attr_keys": [
+    "messaging.destination.name",
+    "messaging.message.body.size",
+    "messaging.operation.name",
+    "messaging.operation.type",
+    "messaging.system",
+    "server.address"
+  ],
+  "m_system": "nats",
+  "m_op_name": "publish",
+  "m_op_type": "send",
+  "m_dest": "demo.trace.request",
+  "link_span_ids": [],
+  "link_trace_ids": []
+}

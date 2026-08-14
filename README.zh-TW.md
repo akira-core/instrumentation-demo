@@ -31,6 +31,14 @@ instrumentation — 不需改應用程式碼、不需重啟。
 instrumentation、同時業務路徑照常運作，就代表接線方式符合我們建議應用程式
 採用的模式。
 
+它同時回答一個單一函式庫測試無法回答的問題：**Go 版與 JS 版是不是在做同一件
+事？** 兩種 runtime 在這裡對同一個 NATS subject 發布與訂閱，因此 span 可以直接
+對照。`make parity` 就是做這件事 —— span 名稱、span kind、完整屬性集與
+consumer span 拓樸，逐對打到 ClickHouse 上斷言。結果記在
+[`docs/parity.zh-TW.md`](docs/parity.zh-TW.md)：**demo 路徑能觸及的每一個面向
+都一致**（14/14 斷言）。它也曾抓到唯一存在過的不等價 —— consumer span 拓樸，
+已在 JS 端 `@akira-core/otel-nats` `0.3.0` 修正 —— 這正是這個 demo 的價值。
+
 ---
 
 ## 架構
@@ -87,7 +95,8 @@ instrumentation、同時業務路徑照常運作，就代表接線方式符合�
 
 一次完整執行會產生**不只一個 trace ID**，這是**刻意設計**。同步路徑
 （frontend → backend → NATS publish）共用 UI 顯示的 ID；NATS
-**consumer** span 則是獨立 root：`otelnats` 以 OTel **span link** 連到
+**consumer** span 則是獨立 root：`otelnats`（Go）與
+`@akira-core/otel-nats`（JS，0.3.0+）都以 OTel **span link** 連到
 publisher，而不是 parent — 符合非同步訊息的 OTel 語意指引。
 
 Grafana 預建儀表板含 **span-linked async spans** 面板，不必硬湊成單一
@@ -110,16 +119,23 @@ waterfall 也能看完整故事。
 
 另外，`js-service` pod 啟動後的**第一次請求**會產生不完整的 JS span：某個 flag key 第一次解析會回傳本地值，同時排入評估。這個視窗在「開啟」方向上是 fail-safe —— 它可能延遲 relay 驅動的開啟，但永遠不會憑空製造一個 —— 不是缺陷。
 
-### 兩個函式庫連接 consumer span 的方式不同
+### 兩個函式庫用同一種方式連接 consumer span
 
-同一則訊息、兩種拓樸，在 Grafana 上都看得到：
+每個 consumer span —— Go 與 JS 皆然 —— 都是自己 trace 上的 **root**，以 span
+**link** 掛上 producer（見上一節）。一次 `demo.trace.request` 發布產生一個 Go
+consumer root 與一個 JS consumer root，各自 link 回同一個 producer span；
+js-service 的自環（`publish demo.trace.js` → `process demo.trace.js`）則掛在
+JS consumer 的新 trace 之下。`make parity` 逐對斷言這件事（`D01`／`D02`），
+連同 span 名稱、kind 與屬性（`P01`–`P12`）。
 
-- **Go**（`instrumentation-go`）把 consumer span 開成 **root**，並以 span **link** 掛上 producer —— 見上一節。
-- **JS**（`@akira-core/otel-nats`）把 consumer span 開成抽取出的遠端 context 的**子 span**，因此它的 span 落在 **producer 的 trace** 上。
+過去並非如此：在 `@akira-core/otel-nats` `0.3.0` 之前，JS consumer span 是
+producer trace 上的**子 span** —— 一個真實的不等價，由本 demo 的 parity 擷取
+揭露，隨後在 JS 函式庫端修正。完整對照表與這段歷史見
+[`docs/parity.zh-TW.md`](docs/parity.zh-TW.md)。
 
-於是一次 `demo.trace.request` 發布會同時產生：一個在自己 trace 上的 Go consumer，以及一個在發布者 trace 上的 JS consumer。兩者都沒有壞；這是兩個函式庫的不同選擇，記在這裡是為了讓在 Grafana 上對照兩者的讀者不會誤判其中一個有問題。
-
-這也是 evidence 腳本的 `nats_count` 要過濾 `ServiceName = 'demo-backend'` 的原因：不過濾的話，部署 `js-service` 會悄悄膨脹一個已經發布出去的數字。
+evidence 腳本的逐 trace 計數按 runtime 分開（`nats_count` 過濾
+`ServiceName = 'demo-backend'`；`js_nats_count` 沿 producer link 追 JS span），
+讓每個欄位跨函式庫世代維持同一個語意。
 
 ### NATS 訊息計數會出現階梯
 
@@ -183,6 +199,9 @@ demo 連線**不要**呼叫 `otelnats.WithTracingEnabled(...)`，讓 option 那�
 - `deploy/loadgen/` — 按需負載 Job，不在預設 `deploy` 路徑內。
 - `third_party/` — 兄弟 instrumentation 倉庫的 git submodule
   （`instrumentation-js`、`instrumentation-go`）。
+- `docs/parity.zh-TW.md` — Go 與 JS 版 `otel-nats` 是否做同一件事：完整對照表、
+  哪幾列由本 demo 端到端驗證，以及 demo 抓到的 consumer 拓樸不等價的始末
+  （已在 JS `0.3.0` 修正）。
 - `openspec/` — 本倉庫變更的規劃文件。
 
 ---
@@ -204,10 +223,10 @@ commit：
 make bootstrap
 ```
 
-各 submodule 追蹤的是**分支**（非永久釘死某 commit）— 見 `.gitmodules`。
-`instrumentation-go` 追蹤 `main`；`instrumentation-js` 追蹤 `feat/otel-nats`
-（`@akira-core/otel-nats` 尚未進 `main`）。推進到追蹤分支 tip 是**刻意、
-明確**的步驟，clone / pull 不會自動發生：
+各 submodule 追蹤的是**分支**（非永久釘死某 commit）— 以 `.gitmodules` 為準：
+`instrumentation-go` 追蹤 `feat/inprogress-openfeature`；`instrumentation-js`
+追蹤 `main`。推進到追蹤分支 tip 是**刻意、明確**的步驟，clone / pull 不會
+自動發生：
 
 ```sh
 git submodule update --remote third_party/instrumentation-go

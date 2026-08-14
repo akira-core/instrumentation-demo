@@ -1,4 +1,4 @@
-TraceId=2a6d35a82a12a552e4dac96ed6e4558d
+TraceId=aaa7d72f9348847a0c4061866906d2a6
    ┌─SpanName─────────────┬─SpanKind─┬─ServiceName──┐
 1. │ POST /api/demo-trace │ Server   │ demo-backend │
    └──────────────────────┴──────────┴──────────────┘
@@ -7,19 +7,19 @@ http_count=1
 nats_spans_cluster_wide_since_probe=0
 --- recent 15 ---
     ┌─t────────────┬─SpanName───────────────────┬─SpanKind─┐
- 1. │ 36f791882294 │ HTTP POST                  │ Client   │
- 2. │ 2a6d35a82a12 │ POST /api/demo-trace       │ Server   │
- 3. │ b55189f59c72 │ process demo.trace.reply   │ Consumer │
- 4. │ 246ffe198c41 │ send demo.trace.reply      │ Producer │
- 5. │ 1917af3e64b0 │ process demo.trace.js      │ Consumer │
- 6. │ 1917af3e64b0 │ process demo.trace.request │ Consumer │
- 7. │ 1917af3e64b0 │ publish demo.trace.js      │ Producer │
- 8. │ 246ffe198c41 │ process demo.trace.request │ Consumer │
- 9. │ 1917af3e64b0 │ send demo.trace.request    │ Producer │
-10. │ 07d365869cc8 │ HTTP POST                  │ Client   │
-11. │ 1917af3e64b0 │ POST /api/demo-trace       │ Server   │
-12. │ 15e2999e7680 │ process demo.trace.js      │ Consumer │
-13. │ 15e2999e7680 │ publish demo.trace.js      │ Producer │
-14. │ 15e2999e7680 │ process demo.trace.request │ Consumer │
-15. │ 44fc711382e1 │ HTTP POST                  │ Client   │
+ 1. │ aaa7d72f9348 │ POST /api/demo-trace       │ Server   │
+ 2. │ b9317f3daf91 │ process demo.trace.reply   │ Consumer │
+ 3. │ 339ebd8a42c8 │ publish demo.trace.reply   │ Producer │
+ 4. │ b4fdd2187010 │ process demo.trace.js      │ Consumer │
+ 5. │ 950ad7f28873 │ process demo.trace.request │ Consumer │
+ 6. │ 950ad7f28873 │ publish demo.trace.js      │ Producer │
+ 7. │ 339ebd8a42c8 │ process demo.trace.request │ Consumer │
+ 8. │ 8e3052258663 │ publish demo.trace.request │ Producer │
+ 9. │ 8e3052258663 │ POST /api/demo-trace       │ Server   │
+10. │ d3a49d0bbff0 │ process demo.trace.reply   │ Consumer │
+11. │ a97f02accdf1 │ publish demo.trace.reply   │ Producer │
+12. │ 6ec63cde8da4 │ process demo.trace.js      │ Consumer │
+13. │ 1b086c3601f4 │ publish demo.trace.js      │ Producer │
+14. │ a97f02accdf1 │ process demo.trace.request │ Consumer │
+15. │ 1b086c3601f4 │ process demo.trace.request │ Consumer │
     └──────────────┴────────────────────────────┴──────────┘

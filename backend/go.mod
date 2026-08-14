@@ -5,11 +5,13 @@ go 1.26.5
 require (
 	// This is a floor, not what gets built. Both the repo-root go.work and the
 	// image's generated one resolve otel-nats to third_party/instrumentation-go,
-	// currently 0.8.0 (unreleased, hence not requirable by version). The demo
-	// targets 0.8.0's revoke-only kill-switch model; bump this line once the tag
-	// exists. `go mod tidy` computes against v0.7.0's dependency graph, which is
-	// why the GO Feature Flag provider tree is absent below — 0.8.0 pulls it in
-	// through otel-nats's own go.mod, no longer through this module.
+	// currently 0.9.1. The demo targets the four-step ladder
+	// (relay > env > option > default) 0.8.0 introduced, plus the semconv
+	// v1.39.0 span names 0.9.0/0.9.1 settled — `publish {subject}`, not the
+	// `send {subject}` earlier versions emitted. `go mod tidy` computes against
+	// v0.7.0's dependency graph, which is why the GO Feature Flag provider tree
+	// is absent below — 0.8.0 onward pulls it in through otel-nats's own go.mod,
+	// no longer through this module.
 	github.com/akira-core/instrumentation-go/otel-nats v0.7.0
 	github.com/nats-io/nats-server/v2 v2.12.6
 	github.com/nats-io/nats.go v1.50.0

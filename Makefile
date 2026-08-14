@@ -52,7 +52,7 @@ define resolve_kind_cluster
 endef
 
 .PHONY: bootstrap chart-test kind-up kind-down kube-context build-images kind-load helm-install k8s-apply \
-	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs
+	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs parity
 
 # Initialize/update git submodules (instrumentation-js, instrumentation-go) to their
 # tracked branch tip. Safe to re-run; required after a clone that skipped
@@ -270,3 +270,15 @@ load-test-logs: kube-context
 # Remove the load-test Job.
 load-test-clean: kube-context
 	kubectl delete job otel-loadgen -n $(NAMESPACE) --ignore-not-found
+
+# Compare the span SHAPE the Go and JS otel-nats emit for the same operation.
+#
+# Distinct from capture-live-evidence.sh, which counts spans to prove one flag
+# flip governs both runtimes. Counting cannot catch a naming or attribute drift
+# between the two implementations — Go 0.9.0 renamed `send {subject}` to
+# `publish {subject}` and a count-only check stayed green through it.
+#
+# Requires a cluster built from the CURRENT submodules (`make deploy`), since it
+# reports on whatever the running images were compiled against.
+parity: kube-context
+	docs/scripts/capture-parity-evidence.sh
