@@ -116,7 +116,10 @@ helm-install: kube-context
 		--set operator.enabled=false \
 		--timeout 15m \
 		-n $(NAMESPACE) --create-namespace
-	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
+	helm upgrade --install grafana charts/grafana \
+		-f deploy/values/grafana.yaml \
+		-f deploy/values/grafana-otel-traces-explorer.yaml \
+		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n $(NAMESPACE) --create-namespace
 

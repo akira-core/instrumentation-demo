@@ -1,10 +1,13 @@
 # Local-demo values for the vendored grafana/grafana chart (charts/grafana,
 # see charts/grafana/SOURCE.txt). Installs the ClickHouse datasource plugin,
 # auto-provisions a ClickHouse datasource pointed at rotel's ClickHouse
-# export target, and auto-provisions one dashboard for looking up a trace by
-# ID. Install with:
+# export target, and auto-provisions dashboards (trace-by-id, traces-list,
+# and the plugin 4.20 OpenTelemetry Traces Explorer). Install with:
 #
-#   helm install grafana charts/grafana -f deploy/values/grafana.yaml -n demo
+#   helm install grafana charts/grafana \
+#     -f deploy/values/grafana.yaml \
+#     -f deploy/values/grafana-otel-traces-explorer.yaml \
+#     -n demo
 #
 # Access (default ClusterIP service, no Ingress):
 #   kubectl port-forward -n demo svc/grafana 3000:3000
@@ -41,9 +44,11 @@
 # panel just sends an empty query and ClickHouse 400s with "Empty query".
 # The `rawSql` below is what that generator produces for this exact schema
 # (hand-derived from sqlGenerator.ts's `generateTraceIdQuery`, then confirmed
-# byte-for-byte via `/api/ds/query` against the live datasource) — it includes
-# the same `otel_traces_trace_id_ts` fast-lookup optimization the interactive
-# builder would produce, given `hasTraceTimestampTable: true`.
+# via `/api/ds/query` against the live datasource) — it includes the
+# `otel_traces_trace_id_ts` fast-lookup optimization plus ScopeName /
+# ScopeVersion aliased as instrumentationLibraryName/Version so the Grafana
+# traces panel shows the library the way Tempo does. The plugin's default
+# OTel column map still omits those two columns.
 
 adminUser: admin
 # Plaintext demo credential, intentional for an ephemeral local `kind` cluster —
@@ -123,6 +128,8 @@ datasources:
             statusCodeColumn: StatusCode
             statusMessageColumn: StatusMessage
             stateColumn: TraceState
+            instrumentationLibraryNameColumn: ScopeName
+            instrumentationLibraryVersionColumn: ScopeVersion
             flattenNested: false
             traceEventsColumnPrefix: Events
             traceLinksColumnPrefix: Links
@@ -172,9 +179,21 @@ dashboards:
           "title": "Trace Propagation Demo",
           "uid": "trace-propagation-demo",
           "schemaVersion": 39,
-          "version": 1,
+          "version": 2,
           "editable": true,
           "timezone": "browser",
+          "tags": ["demo", "traces", "clickhouse", "otel"],
+          "links": [
+            {
+              "asDropdown": true,
+              "icon": "external link",
+              "includeVars": true,
+              "keepTime": true,
+              "tags": ["clickhouse", "otel"],
+              "title": "OpenTelemetry Dashboards",
+              "type": "dashboards"
+            }
+          ],
           "time": { "from": "now-24h", "to": "now" },
           "templating": {
             "list": [
@@ -192,7 +211,7 @@ dashboards:
               "id": 1,
               "type": "traces",
               "title": "Trace timeline",
-              "description": "Waterfall view of every span belonging to the entered Trace ID, across frontend, backend, relay-proxy and NATS producer/consumer.",
+              "description": "Waterfall of every span on the entered Trace ID. Click a span for Tempo-style detail: attributes, resource, events, links, and instrumentation library (ScopeName / ScopeVersion).",
               "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
               "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
               "targets": [
@@ -202,7 +221,7 @@ dashboards:
                   "pluginVersion": "",
                   "editorType": "sql",
                   "format": 3,
-                  "rawSql": "WITH '$trace_id' as __gf_trace_id, (SELECT min(Start) FROM \"otel\".\"otel_traces_trace_id_ts\" WHERE TraceId = __gf_trace_id) as __gf_trace_start, (SELECT max(End) + 1 FROM \"otel\".\"otel_traces_trace_id_ts\" WHERE TraceId = __gf_trace_id) as __gf_trace_end SELECT \"TraceId\" as traceID, \"SpanId\" as spanID, \"ParentSpanId\" as parentSpanID, \"ServiceName\" as serviceName, \"SpanName\" as operationName, multiply(toUnixTimestamp64Nano(\"Timestamp\"), 0.000001) as startTime, multiply(\"Duration\", 0.000001) as duration, arrayMap(key -> map('key', key, 'value',\"SpanAttributes\"[key]), mapKeys(\"SpanAttributes\")) as tags, arrayMap(key -> map('key', key, 'value',\"ResourceAttributes\"[key]), mapKeys(\"ResourceAttributes\")) as serviceTags, if(\"StatusCode\" IN ('Error', 'STATUS_CODE_ERROR'), 2, 0) as statusCode, arrayMap((name, timestamp, attributes) -> tuple(name, toString(toUnixTimestamp64Milli(timestamp)), arrayMap(key -> map('key', key, 'value', attributes[key]), mapKeys(attributes)))::Tuple(name String, timestamp String, fields Array(Map(String, String))), \"Events\".Name, \"Events\".Timestamp, \"Events\".Attributes) AS logs, arrayMap((traceID, spanID, attributes) -> tuple(traceID, spanID, arrayMap(key -> map('key', key, 'value', attributes[key]), mapKeys(attributes)))::Tuple(traceID String, spanID String, tags Array(Map(String, String))), \"Links\".TraceId, \"Links\".SpanId, \"Links\".Attributes) AS references, \"SpanKind\" as kind, \"StatusMessage\" as statusMessage, \"TraceState\" as traceState FROM \"otel\".\"otel_traces\" WHERE traceID = __gf_trace_id AND \"Timestamp\" >= __gf_trace_start AND \"Timestamp\" <= __gf_trace_end"
+                  "rawSql": "WITH '$trace_id' as __gf_trace_id, (SELECT min(Start) FROM \"otel\".\"otel_traces_trace_id_ts\" WHERE TraceId = __gf_trace_id) as __gf_trace_start, (SELECT max(End) + 1 FROM \"otel\".\"otel_traces_trace_id_ts\" WHERE TraceId = __gf_trace_id) as __gf_trace_end SELECT \"TraceId\" as traceID, \"SpanId\" as spanID, \"ParentSpanId\" as parentSpanID, \"ServiceName\" as serviceName, \"SpanName\" as operationName, multiply(toUnixTimestamp64Nano(\"Timestamp\"), 0.000001) as startTime, multiply(\"Duration\", 0.000001) as duration, arrayMap(key -> map('key', key, 'value',\"SpanAttributes\"[key]), mapKeys(\"SpanAttributes\")) as tags, arrayMap(key -> map('key', key, 'value',\"ResourceAttributes\"[key]), mapKeys(\"ResourceAttributes\")) as serviceTags, if(\"StatusCode\" IN ('Error', 'STATUS_CODE_ERROR'), 2, 0) as statusCode, arrayMap((name, timestamp, attributes) -> tuple(name, toString(toUnixTimestamp64Milli(timestamp)), arrayMap(key -> map('key', key, 'value', attributes[key]), mapKeys(attributes)))::Tuple(name String, timestamp String, fields Array(Map(String, String))), \"Events\".Name, \"Events\".Timestamp, \"Events\".Attributes) AS logs, arrayMap((traceID, spanID, attributes) -> tuple(traceID, spanID, arrayMap(key -> map('key', key, 'value', attributes[key]), mapKeys(attributes)))::Tuple(traceID String, spanID String, tags Array(Map(String, String))), \"Links\".TraceId, \"Links\".SpanId, \"Links\".Attributes) AS references, \"SpanKind\" as kind, \"StatusMessage\" as statusMessage, \"TraceState\" as traceState, \"ScopeName\" as instrumentationLibraryName, \"ScopeVersion\" as instrumentationLibraryVersion FROM \"otel\".\"otel_traces\" WHERE traceID = __gf_trace_id AND \"Timestamp\" >= __gf_trace_start AND \"Timestamp\" <= __gf_trace_end"
                 }
               ]
             },
@@ -210,7 +229,7 @@ dashboards:
               "id": 2,
               "type": "table",
               "title": "Spans for Trace ID",
-              "description": "Raw otel_traces rows for the entered Trace ID, one row per span.",
+              "description": "Raw otel_traces rows for the entered Trace ID, including instrumentation ScopeName / ScopeVersion and attribute maps.",
               "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
               "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
               "fieldConfig": {
@@ -230,7 +249,7 @@ dashboards:
                   "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
                   "pluginVersion": "",
                   "editorType": "sql",
-                  "rawSql": "SELECT Timestamp, ServiceName, SpanName, SpanKind, ParentSpanId, SpanId, Duration / 1000000 AS DurationMs, StatusCode, StatusMessage FROM otel.otel_traces WHERE TraceId = '$trace_id' ORDER BY Timestamp ASC",
+                  "rawSql": "SELECT Timestamp, ServiceName, SpanName, SpanKind, ScopeName, ScopeVersion, ParentSpanId, SpanId, Duration / 1000000 AS DurationMs, StatusCode, StatusMessage, SpanAttributes, ResourceAttributes FROM otel.otel_traces WHERE TraceId = '$trace_id' ORDER BY Timestamp ASC",
                   "format": 1
                 }
               ]
@@ -259,7 +278,7 @@ dashboards:
                   "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-traces" },
                   "pluginVersion": "",
                   "editorType": "sql",
-                  "rawSql": "SELECT Timestamp, ServiceName, SpanName, SpanKind, TraceId AS OwnTraceId, SpanId, arrayElement(Links.TraceId, 1) AS LinkedTraceId, arrayElement(Links.SpanId, 1) AS LinkedSpanId, Duration / 1000000 AS DurationMs, StatusCode FROM otel.otel_traces WHERE has(Links.TraceId, '$trace_id') ORDER BY Timestamp ASC",
+                  "rawSql": "SELECT Timestamp, ServiceName, SpanName, SpanKind, ScopeName, ScopeVersion, TraceId AS OwnTraceId, SpanId, arrayElement(Links.TraceId, 1) AS LinkedTraceId, arrayElement(Links.SpanId, 1) AS LinkedSpanId, Duration / 1000000 AS DurationMs, StatusCode, SpanAttributes FROM otel.otel_traces WHERE has(Links.TraceId, '$trace_id') ORDER BY Timestamp ASC",
                   "format": 1
                 }
               ]
@@ -275,7 +294,18 @@ dashboards:
         {
           "title": "Traces List",
           "uid": "traces-list",
-          "tags": ["demo", "traces"],
+          "tags": ["demo", "traces", "clickhouse", "otel"],
+          "links": [
+            {
+              "asDropdown": true,
+              "icon": "external link",
+              "includeVars": true,
+              "keepTime": true,
+              "tags": ["clickhouse", "otel"],
+              "title": "OpenTelemetry Dashboards",
+              "type": "dashboards"
+            }
+          ],
           "schemaVersion": 39,
           "version": 1,
           "editable": true,
