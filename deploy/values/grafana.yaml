@@ -11,14 +11,13 @@
 #   open http://localhost:3000  — anonymous Viewer (no login for dashboards)
 #   admin login still available: admin / demo-grafana-admin
 #
-# ClickHouse connection used below MUST match deploy/values/clickhouse.yaml's
-# read-only `reporter` user and the pinned client Service name:
+# ClickHouse connection used below MUST match the chart's built-in `reporter`
+# user and the demo-pinned client Service name:
 #   host: clickhouse (cluster.clickhouse.service.name in deploy/values/clickhouse.yaml)
 #   port: 8123 (HTTP interface — same interface rotel's exporter writes through)
-#   username: reporter (readonly profile, GRANT SELECT ON otel.* — provisioned
-#     via extraUsersConfig in deploy/values/clickhouse.yaml)
-#   password: demo-clickhouse-reporter-pw (Secret clickhouse-reporter, created
-#     by `make helm-install`)
+#   username: reporter (readonly profile, GRANT SELECT ON otel.* — chart default)
+#   password: demo-clickhouse-reporter-pw (key `reporter` on Secret
+#     clickhouse-default-user, created by `make helm-install`)
 #   database: otel / table: otel_traces (rotel's default database + table-prefix,
 #     schema created by the chart's rotel-ddl Job)
 #

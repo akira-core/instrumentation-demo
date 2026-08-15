@@ -97,17 +97,16 @@ helm-install: kube-context
 	@echo "Waiting for ClickHouse CRDs..."
 	@kubectl wait --for=condition=Established crd/clickhouseinstallations.clickhouse.altinity.com --timeout=120s
 	@kubectl wait --for=condition=Established crd/clickhousekeeperinstallations.clickhouse-keeper.altinity.com --timeout=120s
-	@# Demo passwords for the ClickHouse accounts. The chart only references
-	@# these Secrets; it never creates them.
-	@#   clickhouse-default-user — `default` admin user (rotel writes with it)
-	@#   clickhouse-reporter     — read-only `reporter` user Grafana queries with
-	@#                             (must match datasource secureJsonData in
-	@#                             deploy/values/grafana.yaml)
+	@# Demo credentials. The chart only references this Secret; it never
+	@# creates it. Three keys, three different values:
+	@#   password — `default` admin (rotel writes with it)
+	@#   secret   — inter-replica clusterSecret
+	@#   reporter — read-only `reporter` (Grafana; must match
+	@#              deploy/values/grafana.yaml secureJsonData)
 	@kubectl create secret generic clickhouse-default-user \
 		--from-literal=password='demo-clickhouse-pw' \
-		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl create secret generic clickhouse-reporter \
-		--from-literal=password='demo-clickhouse-reporter-pw' \
+		--from-literal=secret='demo-clickhouse-cluster-secret' \
+		--from-literal=reporter='demo-clickhouse-reporter-pw' \
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	@# --timeout 15m: the post-install DDL Job waits for the full CHI (2 CH
 	@# replicas + 3 Keepers) to assemble before creating the otel schema, which

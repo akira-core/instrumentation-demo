@@ -140,8 +140,10 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.rotel.affinity }}
+      {{- if .Values.rotel.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.rotel.affinity | nindent 8 }}
+      {{- else if .Values.rotel.antiAffinity }}
+      {{- include "cluster.preferredHostnameAntiAffinity" (dict "root" . "component" "rotel" "topologyKey" "kubernetes.io/hostname") | nindent 6 }}
       {{- end }}
 {{- end }}

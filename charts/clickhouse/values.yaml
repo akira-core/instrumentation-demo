@@ -18,9 +18,11 @@
 # Prerequisites:
 #   - Kubernetes >= 1.25
 #   - A default StorageClass (or set storageClassName below)
-#   - A Secret with the default user's password (see README):
+#   - A Secret with three distinct keys (see README):
 #       kubectl create secret generic clickhouse-default-user \
-#         --from-literal=password='<your-password>' -n <namespace>
+#         --from-literal=password='<sql-password>' \
+#         --from-literal=secret='<cluster-secret>' \
+#         --from-literal=reporter='<reporter-password>' -n <namespace>
 #
 # Quick start (upstream): https://github.com/Altinity/clickhouse-operator/blob/master/docs/quick_start.md
 # =============================================================================
@@ -138,10 +140,11 @@ cluster:
     labels: {}
     annotations: {}
 
-    ## Off by default so the chart schedules on a single node. On a multi-node
-    ## cluster set antiAffinity: true and nodeHostnameKey: kubernetes.io/hostname
-    ## to pin one Keeper pod per node (and topologyZoneKey for zone spread).
-    antiAffinity: false
+    ## Soft (preferred) hostname anti-affinity: spread when nodes exist, still
+    ## schedule on a single-node cluster. Set antiAffinityRequired: true to make
+    ## it a hard MaxNumberPerNode (will not schedule if nodes < replicas).
+    antiAffinity: true
+    antiAffinityRequired: false
     podTemplate:
       topologyZoneKey: ""
       nodeHostnameKey: ""
@@ -189,9 +192,10 @@ cluster:
     labels: {}
     annotations: {}
 
-    ## Off by default so both replicas fit on a single node. On a multi-node
-    ## cluster set antiAffinity: true and nodeHostnameKey to spread replicas.
-    antiAffinity: false
+    ## Soft (preferred) hostname anti-affinity. Set antiAffinityRequired: true
+    ## for a hard ClickHouseAntiAffinity (Pending if nodes < replicas).
+    antiAffinity: true
+    antiAffinityRequired: false
     antiAffinityScope: ClickHouseInstallation
     podTemplate:
       topologyZoneKey: ""
@@ -202,10 +206,14 @@ cluster:
       topologySpreadConstraints: []
       volumes: []
 
-    ## Password for the `default` user comes from a pre-created Secret.
-    ## Create it before installing (see README):
+    ## Pre-created Secret (see README). Same object, three distinct keys:
+    ##   password — SQL `default` user (rotel writes with this)
+    ##   secret   — inter-replica clusterSecret
+    ##   reporter — SQL `reporter` user (read-only SELECT)
     ##   kubectl create secret generic clickhouse-default-user \
-    ##     --from-literal=password='<your-password>' -n <namespace>
+    ##     --from-literal=password='<sql-password>' \
+    ##     --from-literal=secret='<cluster-secret>' \
+    ##     --from-literal=reporter='<reporter-password>' -n <namespace>
     defaultUser:
       existingSecret: clickhouse-default-user
       existingSecretKey: password
@@ -222,15 +230,16 @@ cluster:
       host: ""
       port: 2181
 
-    ## Inter-replica cluster secret (recommended for multi-replica)
+    ## Inter-replica cluster secret. Defaults to the same Secret as
+    ## defaultUser, key `secret` — not the SQL password.
     clusterSecret:
       enabled: true
       secure: false
-      auto: true
+      auto: false
       value: ""
       valueFrom:
         secretKeyRef:
-          name: ""
+          name: clickhouse-default-user
           key: secret
 
     settings:
@@ -244,18 +253,28 @@ cluster:
         logger:
           level: information
           console: 1
-      ## Extra users / profiles (converted to Altinity configuration.users /
-      ## profiles). Passwords: use passwordSecret{name,key} pointing at an
-      ## existing Secret, e.g.:
-      ##   users:
-      ##     reporter:
-      ##       passwordSecret:
-      ##         name: reporter-password
-      ##         key: password
-      ##       profile: readonly
-      ##       networks: {ip: "::/0"}
-      ##       grants: [GRANT SELECT ON otel.*]
-      extraUsersConfig: {}
+      ## Read-only `reporter` for Grafana / BI. Password is key `reporter` on
+      ## the same Secret as defaultUser (not key `password`).
+      extraUsersConfig:
+        profiles:
+          readonly:
+            # 2, not 1: Grafana's ClickHouse plugin sets session settings
+            # (max_execution_time) which readonly=1 rejects.
+            readonly: 2
+            max_execution_time: 600
+            max_result_rows: 1000000
+            max_sessions_for_user: 8
+        users:
+          reporter:
+            passwordSecret:
+              name: clickhouse-default-user
+              key: reporter
+            profile: readonly
+            networks:
+              ip: "::/0"
+            grants:
+              query:
+                - GRANT SELECT ON otel.*
 
     ## Extra env for ClickHouse containers
     containerTemplate:
@@ -274,7 +293,9 @@ cluster:
   # ---- Rotel OTLP collector -------------------------------------------------
   rotel:
     enabled: true
-    replicas: 1
+    replicas: 2
+    ## Soft hostname anti-affinity between rotel pods (same semantics as CH).
+    antiAffinity: true
     image:
       registry: docker.io
       repository: streamfold/rotel
@@ -317,3 +338,8 @@ cluster:
       cluster: default
       databaseEngine: Replicated
       ttl: 168h
+      ## Same SQL account as clickhouse.defaultUser. Empty existingSecret
+      ## follows defaultUser.existingSecret (key `password`, not `secret`).
+      user: default
+      existingSecret: ""
+      existingSecretKey: password

@@ -74,12 +74,32 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Name of the pre-created Secret holding the default user's password.
+Preferred hostname anti-affinity. Soft: the scheduler spreads replicas when
+nodes exist, but still packs them on a single-node cluster (kind).
+Expects dict: root (chart context), component, topologyKey (optional).
+*/}}
+{{- define "cluster.preferredHostnameAntiAffinity" -}}
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: {{ .topologyKey | default "kubernetes.io/hostname" | quote }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "cluster.name" .root }}
+              app.kubernetes.io/instance: {{ .root.Release.Name }}
+              app.kubernetes.io/component: {{ .component | quote }}
+{{- end }}
+
+{{/*
+Name of the pre-created Secret holding the default user's password
+(key `password`) and the inter-replica cluster secret (key `secret`).
 The chart never creates this Secret — see the README install steps.
 */}}
 {{- define "cluster.passwordSecretName" -}}
 {{- if not .Values.clickhouse.defaultUser.existingSecret }}
-{{- fail "clickhouse.defaultUser.existingSecret is required — create a Secret with the default user's password (kubectl create secret generic clickhouse-default-user --from-literal=password='...') and set its name here" }}
+{{- fail "clickhouse.defaultUser.existingSecret is required — create Secret clickhouse-default-user with keys password (SQL default), secret (clusterSecret), reporter (SQL reporter)" }}
 {{- end }}
 {{- .Values.clickhouse.defaultUser.existingSecret }}
 {{- end }}

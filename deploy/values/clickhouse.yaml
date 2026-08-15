@@ -7,10 +7,10 @@
 #   clickhouse:8123  — Grafana + any in-cluster client
 #   rotel:4317/4318  — frontend / backend / loadgen OTLP
 #
-# Credentials: the `default` user's password lives in Secret
-# `clickhouse-default-user` (created by `make helm-install`, value
-# demo-clickhouse-pw — must match Grafana's datasource secureJsonData in
-# deploy/values/grafana.yaml).
+# Credentials: Secret `clickhouse-default-user` (created by `make helm-install`)
+# has three keys — `password` (SQL `default` / rotel), `secret` (clusterSecret),
+# `reporter` (SQL reporter). Grafana's datasource password must match the
+# `reporter` key (see deploy/values/grafana.yaml).
 #
 # Install (two steps, see Makefile helm-install):
 #   helm upgrade --install clickhouse-operator charts/clickhouse \
@@ -27,33 +27,6 @@ cluster:
     # Pin the client Service name so Grafana/docs keep using host "clickhouse"
     service:
       name: clickhouse
-    # Read-only account Grafana visualizes traces with (never the `default`
-    # admin user). Password Secret `clickhouse-reporter` is created by
-    # `make helm-install`; its value must match Grafana's datasource
-    # secureJsonData in deploy/values/grafana.yaml.
-    settings:
-      extraUsersConfig:
-        profiles:
-          readonly:
-            # 2, not 1: the Grafana ClickHouse plugin sets session settings
-            # (max_execution_time) on every query, which readonly=1 rejects
-            # with "Cannot modify ... in readonly mode". readonly=2 still
-            # denies all writes and DDL.
-            readonly: 2
-            max_execution_time: 600
-            max_result_rows: 1000000
-            max_sessions_for_user: 8
-        users:
-          reporter:
-            passwordSecret:
-              name: clickhouse-reporter
-              key: password
-            profile: readonly
-            networks:
-              ip: "::/0"
-            grants:
-              query:
-                - GRANT SELECT ON otel.*
 
   rotel:
     # Service/Deployment name "rotel" — matches frontend/backend/loadgen targets
