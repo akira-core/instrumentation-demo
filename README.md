@@ -275,29 +275,29 @@ git submodule update --remote third_party/<repo>
 Requires `docker`, `kind`, `helm`, and `kubectl` locally.
 
 ```sh
-make deploy      # use current kubectl context (or auto-pick a kind cluster),
-                  # build+load images, install/upgrade charts, apply services
-make port-forward  # use current kubectl context; wait Ready, open local ports
+make deploy        # create kind cluster demo-trace if missing, else reuse it;
+                   # build+load images, install/upgrade charts, apply services
+make port-forward  # switch to that cluster; wait Ready, open local ports
 # alias: make pf
 ```
 
-Cluster name is **not hard-coded**. Day-to-day targets use the current kubectl
-context (Docker Desktop, an existing kind context, etc.). To pin a kind cluster:
+The demo always runs on a **kind CLI** cluster named `demo-trace` so `kind load`
+can push local images into the node. Docker Desktop Kubernetes is not used:
+its node is hidden from the host kind CLI, so images cannot be loaded there.
+Override the name when you need an isolated cluster (create if missing, reuse
+if present):
 
 ```sh
 make deploy CLUSTER_NAME=my-kind
 make port-forward CLUSTER_NAME=my-kind
-make teardown CLUSTER_NAME=my-kind
+make teardown CLUSTER_NAME=my-kind      # remove the demo namespace; keep the cluster
+make kind-down CLUSTER_NAME=my-kind     # delete that kind CLI cluster
 ```
 
-When `CLUSTER_NAME` is unset: use the current `kind-*` context name, else the
-sole kind cluster if exactly one exists, else create `demo-trace`. If kubectl
-already points at a reachable non-kind cluster (e.g. Docker Desktop), kind
-create/load is skipped and helm/apply run against that cluster.
-
-`make deploy` is safe to re-run: existing clusters are **reused** (not
-recreated); Helm upgrades in place and manifests are re-applied. `make teardown`
-only deletes a kind cluster — never Docker Desktop or other contexts.
+`make deploy` is safe to re-run: an existing cluster of that name is **reused**
+(not recreated); Helm upgrades in place and manifests are re-applied.
+`make teardown` removes the `demo` namespace only. `make kind-down` deletes the
+kind CLI cluster — never Docker Desktop.
 
 ### Accessing the demo
 
@@ -504,5 +504,6 @@ machine, not as benchmarks.
 ## Tearing down
 
 ```sh
-make teardown     # deletes the kind cluster and everything in it
+make teardown     # remove the demo namespace; keep kind cluster demo-trace
+make kind-down    # delete the kind CLI cluster itself
 ```
