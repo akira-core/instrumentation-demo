@@ -33,6 +33,16 @@ If spans appear correctly in Grafana after a click, and flipping a flag stops
 (or restores) library instrumentation live while the business path keeps running,
 the libraries are wired the way production apps should wire them.
 
+It also answers a question no single-library test can: **do the Go and JS
+implementations do the same thing?** Both runtimes publish and push-subscribe on
+the same NATS subject here, so their spans can be compared directly.
+`make parity` does exactly that — span name, span kind, the full attribute
+set, and the consumer-span topology, asserted pair by pair against ClickHouse.
+[`docs/parity.md`](docs/parity.md) records the result: **identical on every
+dimension the demo path reaches** (14/14 assertions). It also caught the one
+divergence that used to exist — consumer-span topology, fixed on the JS side in
+`@akira-core/otel-nats` `0.3.0` — which is the demo doing its job.
+
 ---
 
 ## Architecture
@@ -97,8 +107,9 @@ the libraries are wired the way production apps should wire them.
 A completed run produces **more than one trace ID by design**. The
 synchronous path (frontend → backend → NATS publish)
 shares the ID shown in the UI. NATS **consumer** spans are separate roots:
-`otelnats` attaches the publisher as an OTel **span link**, not a parent —
-intentional for async messaging (OTel messaging guidance).
+both `otelnats` (Go) and `@akira-core/otel-nats` (JS, 0.3.0+) attach the
+publisher as an OTel **span link**, not a parent — intentional for async
+messaging (OTel messaging guidance).
 
 The provisioned Grafana dashboard has a panel for **span-linked async
 spans** so you can still see the full story.
@@ -120,16 +131,25 @@ Wait out the **larger** bound before concluding anything from a flip. `docs/scri
 
 Expect the **first request after a `js-service` pod start** to produce incomplete JS spans: the first resolution of a flag key returns the local answer while the evaluation is scheduled. That window is fail-safe in the enabling direction — it can delay a relay-driven enable, never introduce one — and is not a defect.
 
-### The two libraries connect consumer spans differently
+### Both libraries connect consumer spans the same way
 
-Same message, two topologies, both visible in Grafana:
+Every consumer span — Go and JS alike — starts as a **root** on its own trace
+and attaches the producer as a span **link** (see the span-link section above).
+One `demo.trace.request` publish yields a Go consumer root and a JS consumer
+root, each linked back to the same producer span; the js-service self-loop
+(`publish demo.trace.js` → `process demo.trace.js`) then hangs off the JS
+consumer's new trace. `make parity` asserts this pair by pair (rows
+`D01`/`D02`), alongside span names, kinds and attributes (`P01`–`P12`).
 
-- **Go** (`instrumentation-go`) starts its consumer span as a **root** and attaches the producer as a span **link** — see the section above.
-- **JS** (`@akira-core/otel-nats`) makes its consumer span a **child** of the extracted remote context, so its spans land on the **producer's** trace.
+It was not always so: before `@akira-core/otel-nats` `0.3.0` the JS consumer
+span was a **child** on the producer's trace — a real divergence this demo's
+parity capture exposed and the JS library then fixed.
+[`docs/parity.md`](docs/parity.md) keeps the full matrix and the history.
 
-One `demo.trace.request` publish therefore yields a Go consumer on its own trace *and* a JS consumer on the publisher's trace. Neither is broken; they are different choices in the two libraries, recorded here so a reader comparing them in Grafana does not conclude that one of them is.
-
-It is also why the evidence script's `nats_count` filters on `ServiceName = 'demo-backend'`: without that filter, deploying `js-service` would have silently inflated an already-published number.
+The evidence script's per-trace counts are runtime-scoped (`nats_count` filters
+on `ServiceName = 'demo-backend'`; `js_nats_count` follows the JS spans through
+their producer link) so each count keeps one stable meaning across library
+generations.
 
 ### The NATS message-count series steps up
 
@@ -197,14 +217,18 @@ is a legal third rung in the library; this demo simply does not use it.)
   from the environment.
 - `deploy/` — `kind` cluster config, Kustomize base for the in-house
   services, and Helm values for the vendored charts.
-- `charts/` — vendored third-party Helm charts (NATS, ClickHouse via the
-  Altinity operator umbrella, Grafana, VictoriaMetrics, and the GO Feature Flag
-  relay proxy). Each subdirectory has a `SOURCE.txt` recording the exact chart
-  version pulled.
+- `charts/` — Helm charts (NATS, ClickHouse via the Altinity operator
+  umbrella, Grafana, VictoriaMetrics, and the GO Feature Flag relay proxy).
+  `charts/clickhouse` is maintained in this repo; the other vendored charts
+  keep a `SOURCE.txt` recording the exact chart version pulled.
 - `deploy/loadgen/` — on-demand load-generator Job, deliberately outside the
   default deploy path.
 - `third_party/` — git submodules for the sibling instrumentation repos
   (`instrumentation-js`, `instrumentation-go`) this demo consumes.
+- `docs/parity.md` — whether the Go and JS `otel-nats` do the same thing: the
+  full comparison matrix, which rows this demo verifies end-to-end, and the
+  history of the consumer-topology divergence the demo caught (fixed in JS
+  `0.3.0`).
 - `openspec/` — planning artifacts for this repo's changes.
 
 ---
@@ -226,9 +250,9 @@ latest commit on a submodule's tracked branch:
 make bootstrap
 ```
 
-Each submodule tracks a branch (not a pinned commit) — see `.gitmodules`.
-`instrumentation-go` tracks `main`. `instrumentation-js` tracks
-`feat/otel-nats`, since `@akira-core/otel-nats` hasn't landed on `main` yet.
+Each submodule tracks a branch (not a pinned commit) — see `.gitmodules`, which
+is the authority: `instrumentation-go` tracks `feat/inprogress-openfeature` and
+`instrumentation-js` tracks `main`.
 Advancing a submodule to the latest commit on its tracked branch is a
 deliberate, explicit step — it never happens automatically on clone or pull:
 

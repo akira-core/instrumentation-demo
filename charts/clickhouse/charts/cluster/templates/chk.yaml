@@ -12,11 +12,10 @@ metadata:
     {{- with include "cluster.stringMap" .Values.keeper.labels }}
     {{- . | nindent 4 }}
     {{- end }}
+  {{- with include "cluster.stringMap" .Values.keeper.annotations }}
   annotations:
-    {{- include "cluster.argocdAnnotations" "keeper" | nindent 4 }}
-    {{- with include "cluster.stringMap" .Values.keeper.annotations }}
     {{- . | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
   defaults:
     storageManagement:

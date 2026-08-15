@@ -79,12 +79,12 @@ chq_num() {
 
 # nats_count_for_trace counts the BACKEND's NATS spans on one trace.
 #
-# The ServiceName filter is not cosmetic and must not be dropped. js-service
-# parents its consumer span on the extracted remote context where the Go library
-# uses a span link, so its spans land on the REQUEST's trace — an unfiltered
-# count here would silently jump from 1 to 4 the moment js-service was deployed,
-# and every previously published campaign would read as if the backend had
-# started emitting more. The JS side is counted separately, by
+# The ServiceName filter predates JS otel-nats 0.3.0, when js-service's consumer
+# span was a child on the REQUEST's trace and an unfiltered count would have
+# silently jumped from 1 to 4. Since 0.3.0 both runtimes' consumer spans are
+# linked roots on their own traces, so nothing from js-service lands on $1
+# anymore — the filter stays because it keeps this count's meaning stable across
+# both library generations. The JS side is counted separately, by
 # js_nats_count_for_trace.
 nats_count_for_trace() {
   chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE '%demo.trace%' AND ServiceName = 'demo-backend'"
@@ -115,11 +115,24 @@ ch_now() {
 
 # js_nats_count_for_trace is the js-service half of the same question.
 #
-# Same trace id as the backend's, deliberately: proving the two runtimes stop and
-# start together is the whole point, and reading them off one trace is what makes
-# that comparison direct.
+# Since JS otel-nats 0.3.0 the JS consumer span is a linked ROOT (same topology
+# as Go), so js-service spans no longer share the request's trace id — they hang
+# off it through a span link instead. The count therefore walks one link hop:
+# the consumer span links a producer span that IS on '$1', the self-loop publish
+# is a child on the consumer's new trace, and the self-loop consumer links that
+# publish. Two link hops + same-trace children = the same 3 spans per click the
+# pre-0.3.0 same-trace count returned, so the evidence field keeps its meaning.
 js_nats_count_for_trace() {
-  chq_num "SELECT count() FROM otel.otel_traces WHERE TraceId = '$1' AND SpanName LIKE '%demo.trace%' AND ServiceName = 'demo-js-service'"
+  chq_num "
+    WITH hop1 AS (
+      SELECT DISTINCT TraceId FROM otel.otel_traces
+      WHERE ServiceName = 'demo-js-service' AND SpanName LIKE '%demo.trace%'
+        AND hasAny(Links.TraceId, ['$1'])
+    )
+    SELECT count() FROM otel.otel_traces
+    WHERE ServiceName = 'demo-js-service' AND SpanName LIKE '%demo.trace%'
+      AND (TraceId IN hop1
+           OR arrayExists(t -> t IN hop1, Links.TraceId))"
 }
 
 # js_nats_count_since is the js-service half of nats_count_since, and carries the
@@ -491,8 +504,9 @@ summary = {
         "C2 額外查「本次探測開始之後」全叢集的 demo.trace span 數（每次嘗試各自取一個 ClickHouse 端時間點），"
         "用來區分「tracing 被關掉」與「propagation 壞掉、span 跑到別條 trace」。"
         "每個 case 對 backend 與 js-service 兩邊都下斷言：一次 ConfigMap 翻轉必須同時管住兩種 runtime。"
-        "nats_count 只算 demo-backend 的 span（js-service 的 consumer span 是 parent-child、會落在同一條 trace 上，"
-        "不過濾會讓這個既有欄位的意義悄悄改變）；js_nats_count 是 js-service 那一半。"
+        "nats_count 只算 demo-backend 的 span；js_nats_count 是 js-service 那一半，"
+        "自 JS otel-nats 0.3.0 起兩種 runtime 的 consumer span 都是「新 trace root + link 回 producer」，"
+        "因此 js_nats_count 改為沿 span link 走一跳來計數（同一次點擊仍是 3 個 span，欄位語意不變）。"
     ),
     "cases": cases,
     "passed": sum(1 for c in cases if c["pass"]),

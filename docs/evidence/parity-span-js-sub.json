@@ -1,0 +1,26 @@
+{
+  "ServiceName": "demo-js-service",
+  "SpanName": "process demo.trace.request",
+  "SpanKind": "Consumer",
+  "TraceId": "1b086c3601f4380c88ac4524058f3719",
+  "SpanId": "1cd8b1861c9e2418",
+  "ParentSpanId": "",
+  "attr_keys": [
+    "messaging.destination.name",
+    "messaging.message.body.size",
+    "messaging.operation.name",
+    "messaging.operation.type",
+    "messaging.system",
+    "server.address"
+  ],
+  "m_system": "nats",
+  "m_op_name": "process",
+  "m_op_type": "process",
+  "m_dest": "demo.trace.request",
+  "link_span_ids": [
+    "e21c8b6377865186"
+  ],
+  "link_trace_ids": [
+    "3877d204f03a94ba1318ddac8e266c7b"
+  ]
+}

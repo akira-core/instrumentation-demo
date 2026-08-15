@@ -52,7 +52,7 @@ define resolve_kind_cluster
 endef
 
 .PHONY: bootstrap chart-test kind-up kind-down kube-context build-images kind-load helm-install k8s-apply \
-	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs
+	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs parity
 
 # Initialize/update git submodules (instrumentation-js, instrumentation-go) to their
 # tracked branch tip. Safe to re-run; required after a clone that skipped
@@ -144,9 +144,25 @@ helm-install: kube-context
 	@echo "Waiting for ClickHouse CRDs..."
 	@kubectl wait --for=condition=Established crd/clickhouseinstallations.clickhouse.altinity.com --timeout=120s
 	@kubectl wait --for=condition=Established crd/clickhousekeeperinstallations.clickhouse-keeper.altinity.com --timeout=120s
+	@# Demo passwords for the ClickHouse accounts. The chart only references
+	@# these Secrets; it never creates them.
+	@#   clickhouse-default-user — `default` admin user (rotel writes with it)
+	@#   clickhouse-reporter     — read-only `reporter` user Grafana queries with
+	@#                             (must match datasource secureJsonData in
+	@#                             deploy/values/grafana.yaml)
+	@kubectl create secret generic clickhouse-default-user \
+		--from-literal=password='demo-clickhouse-pw' \
+		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create secret generic clickhouse-reporter \
+		--from-literal=password='demo-clickhouse-reporter-pw' \
+		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	@# --timeout 15m: the post-install DDL Job waits for the full CHI (2 CH
+	@# replicas + 3 Keepers) to assemble before creating the otel schema, which
+	@# exceeds helm's default 5m hook wait on first install (image pulls + PVCs).
 	helm upgrade --install clickhouse charts/clickhouse \
 		-f deploy/values/clickhouse.yaml \
 		--set operator.enabled=false \
+		--timeout 15m \
 		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
@@ -254,3 +270,15 @@ load-test-logs: kube-context
 # Remove the load-test Job.
 load-test-clean: kube-context
 	kubectl delete job otel-loadgen -n $(NAMESPACE) --ignore-not-found
+
+# Compare the span SHAPE the Go and JS otel-nats emit for the same operation.
+#
+# Distinct from capture-live-evidence.sh, which counts spans to prove one flag
+# flip governs both runtimes. Counting cannot catch a naming or attribute drift
+# between the two implementations — Go 0.9.0 renamed `send {subject}` to
+# `publish {subject}` and a count-only check stayed green through it.
+#
+# Requires a cluster built from the CURRENT submodules (`make deploy`), since it
+# reports on whatever the running images were compiled against.
+parity: kube-context
+	docs/scripts/capture-parity-evidence.sh

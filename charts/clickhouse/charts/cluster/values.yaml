@@ -1,5 +1,5 @@
 ## Default values for the cluster subchart (Altinity CHI/CHK).
-## Parent chart overrides these for production small-business sizing.
+## The parent chart overrides these with the minimal-HA profile.
 
 nameOverride: ""
 fullnameOverride: ""
@@ -22,21 +22,21 @@ keeper:
     storageClassName: ""
     accessModes:
       - ReadWriteOnce
-    size: 20Gi
+    size: 5Gi
     annotations: {}
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: "1"
-      memory: 2Gi
+      cpu: 500m
+      memory: 512Mi
   labels: {}
   annotations: {}
-  antiAffinity: true
+  antiAffinity: false
   podTemplate:
-    topologyZoneKey: topology.kubernetes.io/zone
-    nodeHostnameKey: kubernetes.io/hostname
+    topologyZoneKey: ""
+    nodeHostnameKey: ""
     nodeSelector: {}
     tolerations: []
     affinity: {}
@@ -49,7 +49,7 @@ keeper:
 clickhouse:
   enabled: true
   name: ""
-  replicas: 3
+  replicas: 2
   shards: 1
   clusterName: default
   image:
@@ -62,34 +62,34 @@ clickhouse:
     storageClassName: ""
     accessModes:
       - ReadWriteOnce
-    size: 200Gi
+    size: 20Gi
     annotations: {}
     volumeName: clickhouse-data
   resources:
     requests:
-      cpu: "2"
-      memory: 8Gi
+      cpu: 500m
+      memory: 1Gi
     limits:
-      cpu: "4"
-      memory: 16Gi
+      cpu: "1"
+      memory: 2Gi
   labels: {}
   annotations: {}
-  antiAffinity: true
+  antiAffinity: false
   antiAffinityScope: ClickHouseInstallation
   podTemplate:
-    topologyZoneKey: topology.kubernetes.io/zone
-    nodeHostnameKey: kubernetes.io/hostname
+    topologyZoneKey: ""
+    nodeHostnameKey: ""
     nodeSelector: {}
     tolerations: []
     affinity: {}
     topologySpreadConstraints: []
     volumes: []
+  ## Password for the `default` user comes from a pre-created Secret:
+  ##   kubectl create secret generic clickhouse-default-user \
+  ##     --from-literal=password='<your-password>' -n <namespace>
   defaultUser:
-    password: ""
-    existingSecret: ""
+    existingSecret: clickhouse-default-user
     existingSecretKey: password
-    passwordType: password
-    autoGenerate: true
   keeperClusterRef:
     name: ""
     namespace: ""
@@ -174,14 +174,6 @@ rotel:
     limits:
       cpu: 500m
       memory: 512Mi
-  autoscaling:
-    enabled: false
-    minReplicas: 1
-    maxReplicas: 5
-    targetCPUUtilizationPercentage: 75
-    targetMemoryUtilizationPercentage: 0
-    metrics: []
-    behavior: {}
   service:
     type: ClusterIP
     annotations: {}
@@ -198,18 +190,3 @@ rotel:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-
-# ---------------------------------------------------------------------------
-# TLS (cert-manager Certificates only; wire into CHI/CHK separately)
-# ---------------------------------------------------------------------------
-tls:
-  enabled: false
-  required: true
-  createCertificates: true
-  issuerRef:
-    name: ""
-    kind: Issuer
-  clickhouse:
-    existingSecret: ""
-  keeper:
-    existingSecret: ""

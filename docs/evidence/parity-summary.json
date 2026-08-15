@@ -1,0 +1,128 @@
+{
+  "generated_for_trace": "3877d204f03a94ba1318ddac8e266c7b",
+  "cluster": "kind-parity",
+  "namespace": "demo",
+  "versions": {
+    "go_otel_nats": "0.9.1",
+    "js_otel_nats": "0.3.0"
+  },
+  "totals": {
+    "pass": 14,
+    "fail": 0
+  },
+  "scope": "core NATS publish + push-subscribe only — the demo path has no request/reply RPC, no wildcard subscription and no JetStream; those rows of the matrix are backed by each library's own test suite, not by this capture",
+  "results": [
+    {
+      "id": "P01",
+      "dimension": "publish span name is operation-first",
+      "pass": true,
+      "go": "publish {subject}",
+      "js": "publish {subject}",
+      "note": "semconv v1.39.0 '{messaging.operation.name} {destination}'; Go <0.9.0 emitted 'send {subject}'"
+    },
+    {
+      "id": "P02",
+      "dimension": "publish span kind",
+      "pass": true,
+      "go": "Producer",
+      "js": "Producer",
+      "note": ""
+    },
+    {
+      "id": "P03",
+      "dimension": "publish messaging.system",
+      "pass": true,
+      "go": "nats",
+      "js": "nats",
+      "note": ""
+    },
+    {
+      "id": "P04",
+      "dimension": "publish messaging.operation.name",
+      "pass": true,
+      "go": "publish",
+      "js": "publish",
+      "note": ""
+    },
+    {
+      "id": "P05",
+      "dimension": "publish messaging.operation.type",
+      "pass": true,
+      "go": "send",
+      "js": "send",
+      "note": ""
+    },
+    {
+      "id": "P06",
+      "dimension": "publish attribute key set",
+      "pass": true,
+      "go": "messaging.destination.name,messaging.message.body.size,messaging.operation.name,messaging.operation.type,messaging.system,server.address",
+      "js": "messaging.destination.name,messaging.message.body.size,messaging.operation.name,messaging.operation.type,messaging.system,server.address",
+      "note": ""
+    },
+    {
+      "id": "P07",
+      "dimension": "process span name is operation-first",
+      "pass": true,
+      "go": "process {subject}",
+      "js": "process {subject}",
+      "note": ""
+    },
+    {
+      "id": "P08",
+      "dimension": "process span kind",
+      "pass": true,
+      "go": "Consumer",
+      "js": "Consumer",
+      "note": ""
+    },
+    {
+      "id": "P09",
+      "dimension": "process messaging.system",
+      "pass": true,
+      "go": "nats",
+      "js": "nats",
+      "note": ""
+    },
+    {
+      "id": "P10",
+      "dimension": "process messaging.operation.name",
+      "pass": true,
+      "go": "process",
+      "js": "process",
+      "note": ""
+    },
+    {
+      "id": "P11",
+      "dimension": "process messaging.operation.type",
+      "pass": true,
+      "go": "process",
+      "js": "process",
+      "note": ""
+    },
+    {
+      "id": "P12",
+      "dimension": "process attribute key set",
+      "pass": true,
+      "go": "messaging.destination.name,messaging.message.body.size,messaging.operation.name,messaging.operation.type,messaging.system,server.address",
+      "js": "messaging.destination.name,messaging.message.body.size,messaging.operation.name,messaging.operation.type,messaging.system,server.address",
+      "note": ""
+    },
+    {
+      "id": "D01",
+      "dimension": "consumer span parenting",
+      "pass": true,
+      "go": "new-trace-root",
+      "js": "new-trace-root",
+      "note": "both runtimes start the consumer span from a background/ROOT context (Go: otelnats wrapMsgHandler; JS: internal/consumer-context.ts, 0.3.0+)"
+    },
+    {
+      "id": "D02",
+      "dimension": "consumer span link count",
+      "pass": true,
+      "go": "1",
+      "js": "1",
+      "note": "both runtimes record the producer as exactly one span link"
+    }
+  ]
+}

@@ -1,149 +1,72 @@
-# Local-demo values for the vendored altinity-operator umbrella chart
-# (charts/clickhouse, see charts/clickhouse/SOURCE.txt).
+# Demo overlay for charts/clickhouse — wiring only.
 #
-# Install with:
-#   helm upgrade --install clickhouse charts/clickhouse \
-#     -f deploy/values/clickhouse.yaml -n demo --create-namespace
+# The chart's own values.yaml is already the minimal-HA profile that runs on a
+# single-node cluster (3 Keeper + 1 shard × 2 ClickHouse replicas). This file
+# only pins the names and endpoints the rest of the demo addresses:
 #
-# Architecture (this chart, not Bitnami StatefulSet):
-#   - Altinity ClickHouse Operator (namespace-scoped Role in `demo`)
-#   - ClickHouseKeeperInstallation (1 replica for kind)
-#   - ClickHouseInstallation (1 shard × 1 replica)
-#   - Rotel OTLP collector + schema-init Job (replaces deploy/base/rotel.yaml)
-#
-# Service names are pinned so the rest of the demo keeps addressing:
 #   clickhouse:8123  — Grafana + any in-cluster client
 #   rotel:4317/4318  — frontend / backend / loadgen OTLP
 #
-# Credentials (must match Grafana datasource secureJsonData):
-#   username: default
-#   password: demo-clickhouse-pw
-#   database: otel / table prefix: otel  (rotel defaults + DDL Job)
+# Credentials: the `default` user's password lives in Secret
+# `clickhouse-default-user` (created by `make helm-install`, value
+# demo-clickhouse-pw — must match Grafana's datasource secureJsonData in
+# deploy/values/grafana.yaml).
 #
-# Plaintext demo credential intentionally — fine for an ephemeral kind cluster,
-# not for anything resembling production.
+# Install (two steps, see Makefile helm-install):
+#   helm upgrade --install clickhouse-operator charts/clickhouse \
+#     -f deploy/values/clickhouse.yaml --set cluster.enabled=false -n demo
+#   helm upgrade --install clickhouse charts/clickhouse \
+#     -f deploy/values/clickhouse.yaml --set operator.enabled=false -n demo
 
-# -----------------------------------------------------------------------------
-# Operator — watch only the release namespace (demo)
-# -----------------------------------------------------------------------------
-operator:
-  enabled: true
-  watchNamespaces: []
-  rbac:
-    namespaceScoped: true
-  operator:
-    resources:
-      requests:
-        cpu: 20m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 192Mi
-  metrics:
-    resources:
-      requests:
-        cpu: 10m
-        memory: 32Mi
-      limits:
-        cpu: 100m
-        memory: 96Mi
-
-# -----------------------------------------------------------------------------
-# Cluster — single-node kind profile
-# -----------------------------------------------------------------------------
 cluster:
-  enabled: true
   commonLabels:
     environment: local
     app.kubernetes.io/part-of: demo-trace-propagation-stack
 
-  keeper:
-    replicas: 1
-    antiAffinity: false
-    podTemplate:
-      # kind has one node and no zone labels
-      topologyZoneKey: ""
-      nodeHostnameKey: ""
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    persistence:
-      size: 5Gi
-
   clickhouse:
-    replicas: 1
-    shards: 1
-    antiAffinity: false
-    podTemplate:
-      topologyZoneKey: ""
-      nodeHostnameKey: ""
-    resources:
-      requests:
-        cpu: 250m
-        memory: 1Gi
-      limits:
-        cpu: "1"
-        memory: 2Gi
-    persistence:
-      size: 10Gi
-    defaultUser:
-      password: "demo-clickhouse-pw"
-      autoGenerate: false
-    # Pin client Service name so Grafana/docs keep using host "clickhouse"
+    # Pin the client Service name so Grafana/docs keep using host "clickhouse"
     service:
-      enabled: true
       name: clickhouse
+    # Read-only account Grafana visualizes traces with (never the `default`
+    # admin user). Password Secret `clickhouse-reporter` is created by
+    # `make helm-install`; its value must match Grafana's datasource
+    # secureJsonData in deploy/values/grafana.yaml.
     settings:
-      extraConfig:
-        max_concurrent_queries: 50
-        max_server_memory_usage_to_ram_ratio: 0.9
-        background_pool_size: 16
-        background_merges_mutations_concurrency_ratio: 2
-        mark_cache_size: 536870912
-        uncompressed_cache_size: 1073741824
-        logger:
-          level: information
-          console: 1
-      # Drop production "reporter" user (needs an external Secret)
       extraUsersConfig:
+        profiles:
+          readonly:
+            # 2, not 1: the Grafana ClickHouse plugin sets session settings
+            # (max_execution_time) on every query, which readonly=1 rejects
+            # with "Cannot modify ... in readonly mode". readonly=2 still
+            # denies all writes and DDL.
+            readonly: 2
+            max_execution_time: 600
+            max_result_rows: 1000000
+            max_sessions_for_user: 8
         users:
-          reporter: null
-    containerTemplate:
-      env: []
-    clusterSecret:
-      enabled: false
+          reporter:
+            passwordSecret:
+              name: clickhouse-reporter
+              key: password
+            profile: readonly
+            networks:
+              ip: "::/0"
+            grants:
+              query:
+                - GRANT SELECT ON otel.*
 
   rotel:
-    enabled: true
     # Service/Deployment name "rotel" — matches frontend/backend/loadgen targets
     name: rotel
-    # Single-node: clusterAllReplicas auth + TTL hook not needed locally
-    manageTtl: false
+    # The demo stores traces only; app + rotel internal metrics go to
+    # VictoriaMetrics below.
     telemetry:
       traces: true
       logs: false
       metrics: false
-    # App metrics + rotel internal telemetry → VictoriaMetrics (same as the
-    # former deploy/base/rotel.yaml dual-exporter layout).
     internalMetrics:
       enabled: true
       endpoint: http://victoria-metrics:8428/opentelemetry
     exporter:
-      engine: MergeTree
-      cluster: default
-      databaseEngine: Atomic
-      database: otel
-      tablePrefix: otel
-      user: default
+      # Short retention for an ephemeral demo cluster
       ttl: 24h
-    resources:
-      requests:
-        cpu: 25m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi

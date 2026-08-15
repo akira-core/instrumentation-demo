@@ -29,7 +29,6 @@
 {{- if .Values.rotel.telemetry.metrics }}{{- $metricsRoute = index $route "metrics" }}
 {{- else if $internalEnabled }}{{- $metricsRoute = "vm" }}{{- end }}
 {{- $acceptMetrics := or .Values.rotel.telemetry.metrics $internalEnabled }}
-{{- $autoscaling := .Values.rotel.autoscaling | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,14 +36,8 @@ metadata:
   labels:
     {{- include "cluster.labels" . | nindent 4 }}
     app.kubernetes.io/component: rotel
-  annotations:
-    {{- include "cluster.argocdAnnotations" "rotel" | nindent 4 }}
 spec:
-  {{- if not (dig "enabled" false $autoscaling) }}
-  # Omitted under autoscaling: helm would otherwise reset the replica count the
-  # HPA just chose on every upgrade.
   replicas: {{ .Values.rotel.replicas }}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "cluster.selectorLabels" . | nindent 6 }}

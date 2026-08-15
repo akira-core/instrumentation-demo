@@ -5,8 +5,8 @@
 *.tgz
 !charts/cluster/
 !charts/cluster/**
-!charts/clickhouse-operator-helm/
-!charts/clickhouse-operator-helm/**
+!charts/altinity-clickhouse-operator/
+!charts/altinity-clickhouse-operator/**
 
 # OS / IDE
 .DS_Store

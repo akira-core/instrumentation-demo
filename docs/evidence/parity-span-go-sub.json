@@ -1,0 +1,26 @@
+{
+  "ServiceName": "demo-backend",
+  "SpanName": "process demo.trace.request",
+  "SpanKind": "Consumer",
+  "TraceId": "a97f02accdf1a412b5400d2922523832",
+  "SpanId": "78d08ee111fef6d4",
+  "ParentSpanId": "",
+  "attr_keys": [
+    "messaging.destination.name",
+    "messaging.message.body.size",
+    "messaging.operation.name",
+    "messaging.operation.type",
+    "messaging.system",
+    "server.address"
+  ],
+  "m_system": "nats",
+  "m_op_name": "process",
+  "m_op_type": "process",
+  "m_dest": "demo.trace.request",
+  "link_span_ids": [
+    "e21c8b6377865186"
+  ],
+  "link_trace_ids": [
+    "3877d204f03a94ba1318ddac8e266c7b"
+  ]
+}
