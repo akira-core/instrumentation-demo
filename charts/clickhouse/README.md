@@ -211,9 +211,10 @@ Common knobs (see `values.yaml` for the full commented list):
 | `cluster.clickhouse.settings.extraUsersConfig.users.reporter` | same Secret, key `reporter` | Read-only SQL user for Grafana / BI |
 | `cluster.keeper.replicas` | `3` | Keeper quorum — do not change after first deploy |
 | `cluster.keeper.persistence.size` | `5Gi` | Log volume per Keeper pod |
-| `cluster.clickhouse.antiAffinity` | `true` | Soft hostname spread; still schedules on one node |
-| `cluster.clickhouse.antiAffinityRequired` | `false` | Hard anti-affinity (Pending if nodes < replicas) |
-| `cluster.rotel.replicas` | `2` | OTLP collectors; soft anti-affinity between them |
+| `cluster.clickhouse.topologySpread.enabled` | `true` | Hostname spread (maxSkew 1, DoNotSchedule); still schedules on one node |
+| `cluster.clickhouse.antiAffinity` | `false` | Opt-in soft hostname podAntiAffinity (off by default) |
+| `cluster.clickhouse.antiAffinityRequired` | `false` | Opt-in hard anti-affinity (Pending if nodes < replicas) |
+| `cluster.rotel.replicas` | `2` | OTLP collectors; hostname spread between them |
 | `cluster.rotel.exporter.user` | `default` | Same SQL account as `clickhouse.defaultUser` |
 | `cluster.rotel.enabled` | `true` | OTLP collector + schema Job |
 | `cluster.rotel.exporter.ttl` | `168h` | Retention for otel tables (`0s` = keep forever) |
@@ -288,8 +289,15 @@ Grow in this order — each step is a values change on the same topology:
 
 1. **Resources** — raise `cluster.clickhouse.resources` and
    `persistence.size`; ClickHouse scales vertically very well.
-2. **Spread out** — soft hostname anti-affinity is on by default (kind still
-   packs onto one node). For hard spread that refuses to co-locate, set
+2. **Spread out** — hostname topologySpreadConstraints (maxSkew 1,
+   DoNotSchedule) are on by default: on a multi-node cluster same-component
+   pods spread evenly, while a single-node kind cluster is one topology
+   domain (skew 0) and still schedules. `nodeTaintsPolicy: Honor` keeps
+   untolerated tainted nodes (e.g. a kind control-plane in a multi-node
+   cluster) out of the skew calculation, so they never count as empty
+   domains that would block scheduling. No podAntiAffinity is emitted by
+   default. For a strict one-pod-per-node guarantee that goes Pending
+   instead of stacking, set
    `cluster.{clickhouse,keeper}.antiAffinityRequired: true` (needs enough
    nodes) and optionally `podTemplate.topologyZoneKey` for zone spread.
 3. **Read replicas** — raise `cluster.clickhouse.replicas`. With the

@@ -104,9 +104,14 @@ spec:
           {{- else if and .Values.clickhouse.antiAffinity (not .Values.clickhouse.antiAffinityRequired) }}
           {{- include "cluster.preferredHostnameAntiAffinity" (dict "root" . "component" "clickhouse" "topologyKey" (.Values.clickhouse.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 10 }}
           {{- end }}
-          {{- with .Values.clickhouse.podTemplate.topologySpreadConstraints }}
+          {{- if or .Values.clickhouse.topologySpread.enabled .Values.clickhouse.podTemplate.topologySpreadConstraints }}
           topologySpreadConstraints:
+            {{- if .Values.clickhouse.topologySpread.enabled }}
+            {{- include "cluster.hostnameSpreadConstraint" (dict "root" $ "component" "clickhouse" "cfg" .Values.clickhouse.topologySpread "topologyKey" (.Values.clickhouse.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 12 }}
+            {{- end }}
+            {{- with .Values.clickhouse.podTemplate.topologySpreadConstraints }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.clickhouse.podTemplate.volumes }}
           volumes:

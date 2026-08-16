@@ -8,7 +8,10 @@ description: >
 type: application
 version: 0.3.0
 appVersion: "26.7.1.1315"
-kubeVersion: ">= 1.25.0-0"
+# 1.26+: topologySpreadConstraints.nodeTaintsPolicy (beta, on by default) —
+# on 1.25 the API server drops the field and tainted nodes would wrongly
+# count as empty spread domains.
+kubeVersion: ">= 1.26.0-0"
 home: https://github.com/Altinity/clickhouse-operator
 keywords:
   - clickhouse

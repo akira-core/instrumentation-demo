@@ -140,10 +140,22 @@ cluster:
     labels: {}
     annotations: {}
 
-    ## Soft (preferred) hostname anti-affinity: spread when nodes exist, still
-    ## schedule on a single-node cluster. Set antiAffinityRequired: true to make
-    ## it a hard MaxNumberPerNode (will not schedule if nodes < replicas).
-    antiAffinity: true
+    ## Default scheduling: hostname topologySpreadConstraints (maxSkew 1,
+    ## DoNotSchedule). Multi-node: keeper pods spread evenly (skew <= 1).
+    ## Single-node (kind): one topology domain, skew always 0 — still
+    ## schedules. No podAntiAffinity is emitted by default.
+    topologySpread:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: DoNotSchedule
+      ## Honor: untolerated tainted nodes (e.g. kind control-plane) are
+      ## excluded from skew calculation instead of counting as forever-empty
+      ## domains that would leave pods Pending. Needs Kubernetes >= 1.26.
+      nodeTaintsPolicy: Honor
+    ## Opt-in soft (preferred) hostname podAntiAffinity — off by default.
+    antiAffinity: false
+    ## Opt-in hard operator podDistribution: MaxNumberPerNode (will not
+    ## schedule if nodes < replicas).
     antiAffinityRequired: false
     podTemplate:
       topologyZoneKey: ""
@@ -192,9 +204,22 @@ cluster:
     labels: {}
     annotations: {}
 
-    ## Soft (preferred) hostname anti-affinity. Set antiAffinityRequired: true
-    ## for a hard ClickHouseAntiAffinity (Pending if nodes < replicas).
-    antiAffinity: true
+    ## Default scheduling: hostname topologySpreadConstraints (maxSkew 1,
+    ## DoNotSchedule). Multi-node: ClickHouse pods spread evenly (skew <= 1).
+    ## Single-node (kind): one topology domain, skew always 0 — still
+    ## schedules. No podAntiAffinity is emitted by default.
+    topologySpread:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: DoNotSchedule
+      ## Honor: untolerated tainted nodes (e.g. kind control-plane) are
+      ## excluded from skew calculation instead of counting as forever-empty
+      ## domains that would leave pods Pending. Needs Kubernetes >= 1.26.
+      nodeTaintsPolicy: Honor
+    ## Opt-in soft (preferred) hostname podAntiAffinity — off by default.
+    antiAffinity: false
+    ## Opt-in hard operator podDistribution: ClickHouseAntiAffinity (Pending
+    ## if nodes < replicas).
     antiAffinityRequired: false
     antiAffinityScope: ClickHouseInstallation
     podTemplate:
@@ -294,8 +319,18 @@ cluster:
   rotel:
     enabled: true
     replicas: 2
-    ## Soft hostname anti-affinity between rotel pods (same semantics as CH).
-    antiAffinity: true
+    ## Default scheduling: hostname topologySpreadConstraints between rotel
+    ## pods (same semantics as clickhouse/keeper). No podAntiAffinity by
+    ## default; antiAffinity: true opts back into the soft preferred variant.
+    topologySpread:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: DoNotSchedule
+      ## Honor: untolerated tainted nodes (e.g. kind control-plane) are
+      ## excluded from skew calculation instead of counting as forever-empty
+      ## domains that would leave pods Pending. Needs Kubernetes >= 1.26.
+      nodeTaintsPolicy: Honor
+    antiAffinity: false
     image:
       registry: docker.io
       repository: streamfold/rotel

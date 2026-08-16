@@ -93,6 +93,30 @@ affinity:
 {{- end }}
 
 {{/*
+Hostname topologySpreadConstraint for one component's pods. maxSkew 1 with
+DoNotSchedule forces even spread on multi-node clusters, yet a single-node
+cluster is one topology domain (skew is always 0) so scheduling still
+succeeds there — unlike hard anti-affinity, and with no podAntiAffinity.
+nodeTaintsPolicy Honor keeps untolerated tainted nodes (e.g. a kind
+control-plane) out of the skew calculation — with the default Ignore they
+count as permanently-empty domains and cap every schedulable node at maxSkew
+pods, leaving the rest Pending. Needs Kubernetes >= 1.26 (on 1.25 the field
+is dropped and Ignore semantics return).
+Args: root, component, cfg (the component's topologySpread map), topologyKey.
+*/}}
+{{- define "cluster.hostnameSpreadConstraint" -}}
+- maxSkew: {{ .cfg.maxSkew | default 1 }}
+  topologyKey: {{ .topologyKey | default "kubernetes.io/hostname" | quote }}
+  whenUnsatisfiable: {{ .cfg.whenUnsatisfiable | default "DoNotSchedule" | quote }}
+  nodeTaintsPolicy: {{ .cfg.nodeTaintsPolicy | default "Honor" | quote }}
+  labelSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cluster.name" .root }}
+      app.kubernetes.io/instance: {{ .root.Release.Name }}
+      app.kubernetes.io/component: {{ .component | quote }}
+{{- end }}
+
+{{/*
 Name of the pre-created Secret holding the default user's password
 (key `password`) and the inter-replica cluster secret (key `secret`).
 The chart never creates this Secret — see the README install steps.
