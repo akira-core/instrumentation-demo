@@ -98,9 +98,14 @@ spec:
           {{- else if and .Values.keeper.antiAffinity (not .Values.keeper.antiAffinityRequired) }}
           {{- include "cluster.preferredHostnameAntiAffinity" (dict "root" . "component" "keeper" "topologyKey" (.Values.keeper.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 10 }}
           {{- end }}
-          {{- with .Values.keeper.podTemplate.topologySpreadConstraints }}
+          {{- if or .Values.keeper.topologySpread.enabled .Values.keeper.podTemplate.topologySpreadConstraints }}
           topologySpreadConstraints:
+            {{- if .Values.keeper.topologySpread.enabled }}
+            {{- include "cluster.hostnameSpreadConstraint" (dict "root" $ "component" "keeper" "cfg" .Values.keeper.topologySpread "topologyKey" (.Values.keeper.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 12 }}
+            {{- end }}
+            {{- with .Values.keeper.podTemplate.topologySpreadConstraints }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
     volumeClaimTemplates:
       - name: {{ $dataVct }}

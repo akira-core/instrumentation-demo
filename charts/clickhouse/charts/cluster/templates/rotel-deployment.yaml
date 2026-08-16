@@ -140,6 +140,15 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if or .Values.rotel.topologySpread.enabled .Values.rotel.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- if .Values.rotel.topologySpread.enabled }}
+        {{- include "cluster.hostnameSpreadConstraint" (dict "root" . "component" "rotel" "cfg" .Values.rotel.topologySpread "topologyKey" "kubernetes.io/hostname") | nindent 8 }}
+        {{- end }}
+        {{- with .Values.rotel.topologySpreadConstraints }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
       {{- if .Values.rotel.affinity }}
       affinity:
         {{- toYaml .Values.rotel.affinity | nindent 8 }}
