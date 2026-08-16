@@ -247,27 +247,26 @@ git submodule update --remote third_party/<repo>
 本機需要 `docker`、`kind`、`helm`、`kubectl`。
 
 ```sh
-make deploy       # 沿用目前 kubectl context（或自動選 kind 叢集）、
+make deploy        # 沒有名為 demo-trace 的 kind CLI 叢集就建、有就重用；
                    # 建置並載入映像、安裝／升級 charts、套用服務
-make port-forward  # 用目前 kubectl context；等到 Ready 後一次開好本機 port（Ctrl-C 結束）
+make port-forward  # 切到該叢集；等到 Ready 後一次開好本機 port（Ctrl-C 結束）
 # 別名：make pf
 ```
 
-`make deploy` / `make port-forward` **不寫死** kind 叢集名稱：預設用目前的
-kubectl context（例如 Docker Desktop 或你已選好的 kind context）。若要指定：
+demo 固定跑在 **kind CLI** 叢集 `demo-trace` 上，才能用 `kind load` 把本機
+image 灌進 node。不用 Docker Desktop Kubernetes：它的 node 對 host kind CLI
+是隱藏的，image 灌不進去。若要隔離叢集，覆寫名稱（沒有就建、有就重用）：
 
 ```sh
-make deploy CLUSTER_NAME=my-kind        # 建立或重用名為 my-kind 的 kind 叢集
-make port-forward CLUSTER_NAME=my-kind  # 切到 kind-my-kind 再轉發
-make teardown CLUSTER_NAME=my-kind      # 只刪該 kind 叢集
+make deploy CLUSTER_NAME=my-kind
+make port-forward CLUSTER_NAME=my-kind
+make teardown CLUSTER_NAME=my-kind      # 刪 demo namespace，保留叢集
+make kind-down CLUSTER_NAME=my-kind     # 刪該 kind CLI 叢集
 ```
 
-未指定時：若 context 已是 `kind-*` 則用該名稱；若本機只有一個 kind 叢集則用它；
-否則新建預設名 `demo-trace`。若目前 context 已可連線且不是 kind（例如 Docker
-Desktop），則**跳過** kind create/load，直接對該叢集 helm/apply。
-
-`make deploy` 可安全重跑：既有叢集 **只重用、不刪除重建**；Helm 原地升級、
-manifest 再 apply。`make teardown` 只刪 kind 叢集，不會動 Docker Desktop。
+`make deploy` 可安全重跑：同名叢集 **只重用、不刪除重建**；Helm 原地升級、
+manifest 再 apply。`make teardown` 只拆 `demo` namespace。`make kind-down`
+才刪 kind CLI 叢集，不會動 Docker Desktop。
 
 ### 存取方式
 
@@ -463,5 +462,6 @@ make load-test-clean
 ## 拆除
 
 ```sh
-make teardown     # 刪除 kind 叢集及其中所有資源
+make teardown     # 刪 demo namespace，保留 kind 叢集 demo-trace
+make kind-down    # 刪除 kind CLI 叢集本身
 ```

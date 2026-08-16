@@ -1,15 +1,16 @@
-# Kind cluster name is optional — do not hardcode a single cluster.
+# Always use a kind CLI cluster of a fixed name so `kind load` can reach the
+# node. Docker Desktop Kubernetes is also kind-backed, but its node is hidden
+# from the host kind CLI — images cannot be loaded there, so it is never a target.
 #
-#   make port-forward                 # use current kubectl context (recommended)
-#   make deploy CLUSTER_NAME=desktop  # pin a kind cluster by name
-#   make deploy                       # auto-pick: current kind-* context, sole kind
-#                                     # cluster, or create DEFAULT_CLUSTER_NAME
+#   make deploy                       # create kind cluster demo-trace, or reuse it
+#   make teardown                     # delete the demo namespace; keep the cluster
+#   make kind-down                    # delete the kind CLI cluster itself
+#   make deploy CLUSTER_NAME=parity   # same, but the cluster is named parity
 #
-# Day-to-day targets (port-forward, helm, apply, load-test) use whatever
-# kubectl currently points at unless CLUSTER_NAME is set.
-CLUSTER_NAME         ?=
-DEFAULT_CLUSTER_NAME := demo-trace
-NAMESPACE            := demo
+# If the named cluster already exists it is left in place (no delete/recreate).
+CLUSTER_NAME ?= demo-trace
+KIND_CONTEXT := kind-$(CLUSTER_NAME)
+NAMESPACE    := demo
 
 # Load-test knobs — override on the command line, e.g.
 #   make load-test WORKERS=10 DURATION=2m SPANS_PER_RESOURCE=500
@@ -23,33 +24,6 @@ PF_FRONTEND_PORT ?= 8081
 PF_BACKEND_PORT  ?= 8080
 PF_GRAFANA_PORT  ?= 3000
 PF_ROTEL_PORT    ?= 4318
-
-# Resolve which kind cluster name to use for kind create/load/delete.
-# Order: explicit CLUSTER_NAME → kind-* current context → sole kind cluster → default.
-# Exports RESOLVED_CLUSTER (empty only if no kind tooling path applies).
-#
-# The case patterns below carry a leading `(`. This macro is used inside `$(...)`
-# and make's default SHELL on macOS is /bin/sh = bash 3.2, whose command
-# substitution parser mistakes the `)` of an unparenthesised case pattern for the
-# closing paren of the substitution ("syntax error near unexpected token `;;'").
-define resolve_kind_cluster
-	if [ -n "$(CLUSTER_NAME)" ]; then \
-		echo "$(CLUSTER_NAME)"; \
-	else \
-		ctx=$$(kubectl config current-context 2>/dev/null || true); \
-		case "$$ctx" in \
-			(kind-*) echo "$${ctx#kind-}" ;; \
-			(*) \
-				clusters=$$(kind get clusters 2>/dev/null || true); \
-				n=$$(printf '%s\n' "$$clusters" | sed '/^$$/d' | wc -l | tr -d ' '); \
-				if [ "$$n" -eq 1 ]; then \
-					printf '%s\n' "$$clusters" | sed '/^$$/d'; \
-				else \
-					echo "$(DEFAULT_CLUSTER_NAME)"; \
-				fi ;; \
-		esac; \
-	fi
-endef
 
 .PHONY: bootstrap chart-test kind-up kind-down kube-context build-images kind-load helm-install k8s-apply \
 	deploy wait-ready port-forward pf teardown load-test load-test-clean load-test-logs parity
@@ -71,35 +45,20 @@ chart-test:
 	}
 	helm unittest charts/relay-proxy
 
-# Create a local kind cluster only if the resolved name does not already exist.
-# Never deletes or recreates an existing cluster — re-run `make deploy` to upgrade in place.
-# Skip kind create when CLUSTER_NAME is unset and current context is already a
-# reachable non-kind cluster (e.g. Docker Desktop) that already has the demo.
+# Create the named kind CLI cluster only if it does not already exist.
+# Never deletes or recreates — re-run `make deploy` to upgrade in place.
 kind-up:
-	@name=$$($(resolve_kind_cluster)); \
-	if kind get clusters 2>/dev/null | grep -qx "$$name"; then \
-		echo "kind cluster '$$name' already exists — reusing (no recreate)"; \
-	elif [ -z "$(CLUSTER_NAME)" ] && kubectl cluster-info >/dev/null 2>&1; then \
-		ctx=$$(kubectl config current-context 2>/dev/null || true); \
-		case "$$ctx" in \
-			kind-*) \
-				echo "Creating kind cluster '$$name'..."; \
-				kind create cluster --name "$$name" --config deploy/kind-cluster.yaml ;; \
-			*) \
-				echo "kubectl already points at '$$ctx' — skipping kind create (pass CLUSTER_NAME=... to force a kind cluster)" ;; \
-		esac; \
+	@if kind get clusters 2>/dev/null | grep -qx "$(CLUSTER_NAME)"; then \
+		echo "kind cluster '$(CLUSTER_NAME)' already exists — reusing (no recreate)"; \
 	else \
-		echo "Creating kind cluster '$$name'..."; \
-		kind create cluster --name "$$name" --config deploy/kind-cluster.yaml; \
+		echo "Creating kind cluster '$(CLUSTER_NAME)'..."; \
+		kind create cluster --name "$(CLUSTER_NAME)" --config deploy/kind-cluster.yaml; \
 	fi
 	@$(MAKE) --no-print-directory kube-context
 
-# Point kubectl at a cluster when CLUSTER_NAME is set; otherwise keep current context.
-# Safe for Docker Desktop / any pre-existing kubeconfig — no hard-coded kind name.
+# Point kubectl at the named kind CLI cluster (context kind-<CLUSTER_NAME>).
 kube-context:
-	@if [ -n "$(CLUSTER_NAME)" ]; then \
-		kubectl config use-context "kind-$(CLUSTER_NAME)" >/dev/null; \
-	fi
+	@kubectl config use-context "$(KIND_CONTEXT)" >/dev/null
 	@echo "kubectl context: $$(kubectl config current-context)"
 	@kubectl cluster-info >/dev/null
 
@@ -112,16 +71,10 @@ build-images:
 	docker build -f js-service/Dockerfile -t demo-js-service:local .
 	docker build -t demo-frontend:local frontend/
 
-# Load the freshly-built images into a kind cluster (no registry needed).
-# Skips when the active cluster is not kind (e.g. Docker Desktop can pull local tags).
+# Load the freshly-built images into the named kind CLI cluster (no registry).
 kind-load: build-images
-	@name=$$($(resolve_kind_cluster)); \
-	if kind get clusters 2>/dev/null | grep -qx "$$name"; then \
-		echo "Loading images into kind cluster '$$name'..."; \
-		kind load docker-image demo-backend:local demo-js-service:local demo-frontend:local --name "$$name"; \
-	else \
-		echo "No kind cluster named '$$name' — skipping kind load (images must already be available to the cluster)"; \
-	fi
+	@echo "Loading images into kind cluster '$(CLUSTER_NAME)'..."
+	kind load docker-image demo-backend:local demo-js-service:local demo-frontend:local --name "$(CLUSTER_NAME)"
 
 # Install/upgrade the vendored third-party charts (NATS, ClickHouse+rotel via
 # Altinity operator, Grafana, GOFF relay proxy, VictoriaMetrics).
@@ -144,17 +97,16 @@ helm-install: kube-context
 	@echo "Waiting for ClickHouse CRDs..."
 	@kubectl wait --for=condition=Established crd/clickhouseinstallations.clickhouse.altinity.com --timeout=120s
 	@kubectl wait --for=condition=Established crd/clickhousekeeperinstallations.clickhouse-keeper.altinity.com --timeout=120s
-	@# Demo passwords for the ClickHouse accounts. The chart only references
-	@# these Secrets; it never creates them.
-	@#   clickhouse-default-user — `default` admin user (rotel writes with it)
-	@#   clickhouse-reporter     — read-only `reporter` user Grafana queries with
-	@#                             (must match datasource secureJsonData in
-	@#                             deploy/values/grafana.yaml)
+	@# Demo credentials. The chart only references this Secret; it never
+	@# creates it. Three keys, three different values:
+	@#   password — `default` admin (rotel writes with it)
+	@#   secret   — inter-replica clusterSecret
+	@#   reporter — read-only `reporter` (Grafana; must match
+	@#              deploy/values/grafana.yaml secureJsonData)
 	@kubectl create secret generic clickhouse-default-user \
 		--from-literal=password='demo-clickhouse-pw' \
-		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl create secret generic clickhouse-reporter \
-		--from-literal=password='demo-clickhouse-reporter-pw' \
+		--from-literal=secret='demo-clickhouse-cluster-secret' \
+		--from-literal=reporter='demo-clickhouse-reporter-pw' \
 		-n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	@# --timeout 15m: the post-install DDL Job waits for the full CHI (2 CH
 	@# replicas + 3 Keepers) to assemble before creating the otel schema, which
@@ -164,7 +116,10 @@ helm-install: kube-context
 		--set operator.enabled=false \
 		--timeout 15m \
 		-n $(NAMESPACE) --create-namespace
-	helm upgrade --install grafana charts/grafana -f deploy/values/grafana.yaml -n $(NAMESPACE) --create-namespace
+	helm upgrade --install grafana charts/grafana \
+		-f deploy/values/grafana.yaml \
+		-f deploy/values/grafana-otel-traces-explorer.yaml \
+		-n $(NAMESPACE) --create-namespace
 	helm upgrade --install relay-proxy charts/relay-proxy -f deploy/values/relay-proxy.yaml -n $(NAMESPACE) --create-namespace
 	helm upgrade --install victoria-metrics charts/victoria-metrics -f deploy/values/victoria-metrics.yaml -n $(NAMESPACE) --create-namespace
 
@@ -179,7 +134,7 @@ k8s-apply: kube-context
 # Safe to re-run: does not delete an existing kind cluster.
 deploy: kind-up kind-load helm-install k8s-apply
 	@echo ""
-	@echo "Deployed (kubectl context: $$(kubectl config current-context))."
+	@echo "Deployed to kind cluster '$(CLUSTER_NAME)' (context $(KIND_CONTEXT))."
 	@echo "When pods are Ready, open access with:"
 	@echo "  make port-forward"
 	@echo ""
@@ -209,7 +164,6 @@ wait-ready: kube-context
 
 # Port-forward frontend, backend, Grafana, and rotel in one process.
 # Blocks until Ctrl-C; then stops all forwards.
-# Uses the current kubectl context (no hard-coded kind cluster name).
 # Usage after deploy:
 #   make port-forward
 #   # or: make pf
@@ -228,23 +182,27 @@ port-forward pf: kube-context wait-ready
 	kubectl -n $(NAMESPACE) port-forward svc/rotel    $(PF_ROTEL_PORT):4318 & \
 	wait
 
-# Tear down — only deletes a kind cluster (never touches Docker Desktop / other contexts).
-# Pass CLUSTER_NAME=... when more than one kind cluster exists or auto-detect is ambiguous.
+# Tear down the demo workloads only. The kind CLI cluster is kept so the next
+# `make deploy` can reuse it (and the images already loaded into the node).
 teardown:
-	@name=$$($(resolve_kind_cluster)); \
-	if kind get clusters 2>/dev/null | grep -qx "$$name"; then \
-		echo "Deleting kind cluster '$$name'..."; \
-		kind delete cluster --name "$$name"; \
-	else \
-		echo "No kind cluster named '$$name' — refusing to tear down current context '$$(kubectl config current-context 2>/dev/null)'."; \
-		echo "Hint: make teardown CLUSTER_NAME=<kind-cluster-name>"; \
+	@if ! kind get clusters 2>/dev/null | grep -qx "$(CLUSTER_NAME)"; then \
+		echo "No kind cluster named '$(CLUSTER_NAME)'."; \
 		exit 1; \
 	fi
+	@$(MAKE) --no-print-directory kube-context
+	@echo "Removing namespace '$(NAMESPACE)' from kind cluster '$(CLUSTER_NAME)' (cluster kept)..."
+	kubectl delete namespace $(NAMESPACE) --ignore-not-found --wait
+	@echo "Kind cluster '$(CLUSTER_NAME)' still running. Delete it with: make kind-down"
 
-# `kind-down` reads as the counterpart to `kind-up` and has been in .PHONY since
-# the Makefile was written, but never had a recipe — so `make kind-down` printed
-# "Nothing to be done" and deleted nothing, while looking like it had worked.
-kind-down: teardown
+# Delete the named kind CLI cluster (never Docker Desktop).
+kind-down:
+	@if kind get clusters 2>/dev/null | grep -qx "$(CLUSTER_NAME)"; then \
+		echo "Deleting kind cluster '$(CLUSTER_NAME)'..."; \
+		kind delete cluster --name "$(CLUSTER_NAME)"; \
+	else \
+		echo "No kind cluster named '$(CLUSTER_NAME)'."; \
+		exit 1; \
+	fi
 
 # Run a bounded OTLP trace load test against rotel. Not part of `deploy` — load
 # only ever runs when explicitly asked for.

@@ -1,0 +1,18 @@
+# deploy/grafana
+#
+# OpenTelemetry Traces Explorer dashboard JSON, vendored from
+# grafana/clickhouse-datasource v4.20.0:
+#   https://github.com/grafana/clickhouse-datasource/blob/v4.20.0/src/dashboards/otel-traces-explorer.json
+#
+# Local deltas (keep these if you refresh the file):
+#   - tags += demo
+#   - default time range now-24h (upstream is now-1h; demo traffic is bursty)
+#   - datasource variable current = clickhouse-traces
+#   - Trace Search Results TraceId links to /d/trace-propagation-demo
+#   - extra dashboard link "Trace by ID"
+#
+# Helm loads the JSON via deploy/values/grafana-otel-traces-explorer.yaml
+# (merged after deploy/values/grafana.yaml). Refresh:
+#   curl -sSL -o /tmp/otel-traces-explorer.json \
+#     https://raw.githubusercontent.com/grafana/clickhouse-datasource/v4.20.0/src/dashboards/otel-traces-explorer.json
+#   then re-apply the deltas above and regenerate the values fragment.

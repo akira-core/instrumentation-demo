@@ -60,10 +60,9 @@ spec:
           annotations:
             {{- . | nindent 12 }}
           {{- end }}
-        {{- /* Anti-affinity / spread: mirror topologyZoneKey + nodeHostnameKey */}}
-        {{- if or .Values.keeper.podTemplate.nodeHostnameKey .Values.keeper.podTemplate.topologyZoneKey .Values.keeper.antiAffinity }}
+        {{- if or .Values.keeper.antiAffinityRequired .Values.keeper.podTemplate.topologyZoneKey }}
         podDistribution:
-          {{- if or .Values.keeper.antiAffinity .Values.keeper.podTemplate.nodeHostnameKey }}
+          {{- if .Values.keeper.antiAffinityRequired }}
           - type: MaxNumberPerNode
             number: 1
             topologyKey: {{ .Values.keeper.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname" | quote }}
@@ -93,9 +92,11 @@ spec:
           tolerations:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.keeper.podTemplate.affinity }}
+          {{- if .Values.keeper.podTemplate.affinity }}
           affinity:
-            {{- toYaml . | nindent 12 }}
+            {{- toYaml .Values.keeper.podTemplate.affinity | nindent 12 }}
+          {{- else if and .Values.keeper.antiAffinity (not .Values.keeper.antiAffinityRequired) }}
+          {{- include "cluster.preferredHostnameAntiAffinity" (dict "root" . "component" "keeper" "topologyKey" (.Values.keeper.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 10 }}
           {{- end }}
           {{- with .Values.keeper.podTemplate.topologySpreadConstraints }}
           topologySpreadConstraints:

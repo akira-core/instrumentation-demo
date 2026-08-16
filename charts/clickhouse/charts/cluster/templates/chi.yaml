@@ -46,9 +46,9 @@ spec:
           annotations:
             {{- . | nindent 12 }}
           {{- end }}
-        {{- if or .Values.clickhouse.antiAffinity .Values.clickhouse.podTemplate.nodeHostnameKey .Values.clickhouse.podTemplate.topologyZoneKey }}
+        {{- if or .Values.clickhouse.antiAffinityRequired .Values.clickhouse.podTemplate.topologyZoneKey }}
         podDistribution:
-          {{- if or .Values.clickhouse.antiAffinity .Values.clickhouse.podTemplate.nodeHostnameKey }}
+          {{- if .Values.clickhouse.antiAffinityRequired }}
           - type: ClickHouseAntiAffinity
             scope: {{ .Values.clickhouse.antiAffinityScope | default "ClickHouseInstallation" | quote }}
             topologyKey: {{ .Values.clickhouse.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname" | quote }}
@@ -98,9 +98,11 @@ spec:
           tolerations:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.clickhouse.podTemplate.affinity }}
+          {{- if .Values.clickhouse.podTemplate.affinity }}
           affinity:
-            {{- toYaml . | nindent 12 }}
+            {{- toYaml .Values.clickhouse.podTemplate.affinity | nindent 12 }}
+          {{- else if and .Values.clickhouse.antiAffinity (not .Values.clickhouse.antiAffinityRequired) }}
+          {{- include "cluster.preferredHostnameAntiAffinity" (dict "root" . "component" "clickhouse" "topologyKey" (.Values.clickhouse.podTemplate.nodeHostnameKey | default "kubernetes.io/hostname")) | nindent 10 }}
           {{- end }}
           {{- with .Values.clickhouse.podTemplate.topologySpreadConstraints }}
           topologySpreadConstraints:
@@ -200,19 +202,23 @@ spec:
           shardsCount: {{ .Values.clickhouse.shards }}
           replicasCount: {{ .Values.clickhouse.replicas }}
         {{- if .Values.clickhouse.clusterSecret.enabled }}
-        {{- if .Values.clickhouse.clusterSecret.secure }}
+        {{- $cs := .Values.clickhouse.clusterSecret }}
+        {{- if and (not $cs.auto) (not $cs.value) (not (dig "valueFrom" "secretKeyRef" "name" "" $cs)) }}
+        {{- fail "clickhouse.clusterSecret is enabled but none of auto, value, or valueFrom.secretKeyRef.name is set" }}
+        {{- end }}
+        {{- if $cs.secure }}
         secure: "yes"
         {{- end }}
         secret:
-          {{- if .Values.clickhouse.clusterSecret.auto }}
+          {{- if $cs.auto }}
           auto: "true"
-          {{- else if .Values.clickhouse.clusterSecret.value }}
-          value: {{ .Values.clickhouse.clusterSecret.value | quote }}
-          {{- else if and .Values.clickhouse.clusterSecret.valueFrom .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.name }}
+          {{- else if $cs.value }}
+          value: {{ $cs.value | quote }}
+          {{- else }}
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.name | quote }}
-              key: {{ .Values.clickhouse.clusterSecret.valueFrom.secretKeyRef.key | default "secret" | quote }}
+              name: {{ $cs.valueFrom.secretKeyRef.name | quote }}
+              key: {{ $cs.valueFrom.secretKeyRef.key | default "secret" | quote }}
           {{- end }}
         {{- end }}
     {{- /* Keeper: prefer CHK reference; fall back to explicit host list */}}

@@ -52,20 +52,30 @@ export NS=clickhouse
 kubectl create namespace "$NS"
 ```
 
-### 2. Create the default user's password Secret
+### 2. Create the shared credentials Secret
 
-The chart never generates or stores a password — it references a Secret you
-create. The `default` ClickHouse user (and rotel, which authenticates as it)
-reads key `password` from Secret `clickhouse-default-user`:
+The chart never generates or stores credentials — it references a Secret you
+create. One Secret, three **different** keys (do not reuse the same value):
+
+| Key | Used by | Purpose |
+|---|---|---|
+| `password` | `default` SQL user **and** rotel (`rotel.exporter.user: default`) | Admin login / INSERT |
+| `secret` | `clusterSecret` (inter-replica) | Replica mutual auth |
+| `reporter` | SQL `reporter` user | Read-only SELECT for Grafana / BI |
 
 ```bash
 kubectl create secret generic clickhouse-default-user \
   --from-literal=password='CHANGE_ME_STRONG' \
+  --from-literal=secret='CHANGE_ME_CLUSTER_SECRET' \
+  --from-literal=reporter='CHANGE_ME_REPORTER_PASSWORD' \
   -n "$NS"
 ```
 
-Different Secret name or key? Set `cluster.clickhouse.defaultUser.existingSecret`
-/ `existingSecretKey` at install time.
+Different Secret or keys? Set
+`cluster.clickhouse.defaultUser.existingSecret` /
+`existingSecretKey`,
+`cluster.clickhouse.clusterSecret.valueFrom.secretKeyRef`, and
+`cluster.clickhouse.settings.extraUsersConfig.users.reporter.passwordSecret`.
 
 ### 3. Install
 
@@ -196,10 +206,15 @@ Common knobs (see `values.yaml` for the full commented list):
 | `cluster.clickhouse.shards` | `1` | Keep at 1 — see [Scaling](#scaling) |
 | `cluster.clickhouse.persistence.size` | `20Gi` | Data volume per ClickHouse pod |
 | `cluster.clickhouse.resources` | 0.5–1 CPU / 1–2Gi | Per ClickHouse pod |
-| `cluster.clickhouse.defaultUser.existingSecret` | `clickhouse-default-user` | Pre-created Secret with the `default` user's password |
+| `cluster.clickhouse.defaultUser.existingSecret` | `clickhouse-default-user` | Secret for keys `password`, `secret`, `reporter` |
+| `cluster.clickhouse.clusterSecret.valueFrom` | same Secret, key `secret` | Inter-replica secret (not a SQL password) |
+| `cluster.clickhouse.settings.extraUsersConfig.users.reporter` | same Secret, key `reporter` | Read-only SQL user for Grafana / BI |
 | `cluster.keeper.replicas` | `3` | Keeper quorum — do not change after first deploy |
 | `cluster.keeper.persistence.size` | `5Gi` | Log volume per Keeper pod |
-| `cluster.clickhouse.antiAffinity` | `false` | Set `true` + `podTemplate.nodeHostnameKey` on multi-node clusters |
+| `cluster.clickhouse.antiAffinity` | `true` | Soft hostname spread; still schedules on one node |
+| `cluster.clickhouse.antiAffinityRequired` | `false` | Hard anti-affinity (Pending if nodes < replicas) |
+| `cluster.rotel.replicas` | `2` | OTLP collectors; soft anti-affinity between them |
+| `cluster.rotel.exporter.user` | `default` | Same SQL account as `clickhouse.defaultUser` |
 | `cluster.rotel.enabled` | `true` | OTLP collector + schema Job |
 | `cluster.rotel.exporter.ttl` | `168h` | Retention for otel tables (`0s` = keep forever) |
 | `cluster.rotel.telemetry.{traces,logs,metrics}` | traces+logs | Signals rotel accepts and stores |
@@ -207,30 +222,26 @@ Common knobs (see `values.yaml` for the full commented list):
 
 ### Extra users
 
-`cluster.clickhouse.settings.extraUsersConfig` converts nested users/profiles
-into Altinity configuration. Passwords come from Secrets via
-`passwordSecret`:
+`reporter` is created by default (readonly profile, `GRANT SELECT ON otel.*`,
+password key `reporter` on `clickhouse-default-user`). Add more users the
+same way:
 
 ```yaml
 cluster:
   clickhouse:
     settings:
       extraUsersConfig:
-        profiles:
-          readonly:
-            readonly: 1
-            max_execution_time: 600
         users:
-          reporter:
+          analyst:
             passwordSecret:
-              name: reporter-password   # kubectl create secret ... beforehand
-              key: password
+              name: clickhouse-default-user
+              key: analyst
             profile: readonly
             networks:
               ip: "::/0"
             grants:
               query:
-                - GRANT SELECT ON otel.otel_traces
+                - GRANT SELECT ON otel.*
 ```
 
 ### Why the otel database uses the Replicated engine
@@ -277,10 +288,10 @@ Grow in this order — each step is a values change on the same topology:
 
 1. **Resources** — raise `cluster.clickhouse.resources` and
    `persistence.size`; ClickHouse scales vertically very well.
-2. **Spread out** — on a multi-node cluster set
-   `cluster.{clickhouse,keeper}.antiAffinity: true` and
-   `podTemplate.nodeHostnameKey: kubernetes.io/hostname` (plus
-   `topologyZoneKey` for zone spread).
+2. **Spread out** — soft hostname anti-affinity is on by default (kind still
+   packs onto one node). For hard spread that refuses to co-locate, set
+   `cluster.{clickhouse,keeper}.antiAffinityRequired: true` (needs enough
+   nodes) and optionally `podTemplate.topologyZoneKey` for zone spread.
 3. **Read replicas** — raise `cluster.clickhouse.replicas`. With the
    `Replicated` database engine the new replica syncs schema and data
    automatically.
